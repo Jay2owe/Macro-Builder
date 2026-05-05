@@ -30,9 +30,26 @@ if ($env:IMAGEJ_UPLOAD_USER) {
 }
 
 $fiji = Get-Item -LiteralPath $FijiDir
-$launcher = Join-Path $fiji.FullName "ImageJ-linux64"
-if (-not (Test-Path -LiteralPath $launcher -PathType Leaf)) {
-    throw "Fiji Linux launcher not found: $launcher"
+$launcherNames = @("ImageJ-linux64", "ImageJ2-linux64", "ImageJ-linux64.sh", "ImageJ2-linux64.sh")
+$launcher = $null
+foreach ($name in $launcherNames) {
+    $candidate = Join-Path $fiji.FullName $name
+    if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+        $launcher = $candidate
+        break
+    }
+}
+
+if (-not $launcher) {
+    $launcher = Get-ChildItem -LiteralPath $fiji.FullName -Recurse -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -match "^ImageJ2?.*linux64" } |
+        Select-Object -First 1 -ExpandProperty FullName
+}
+
+if (-not $launcher) {
+    $candidates = Get-ChildItem -LiteralPath $fiji.FullName -File -ErrorAction SilentlyContinue |
+        Select-Object -ExpandProperty Name
+    throw "Fiji Linux launcher was not found in '$($fiji.FullName)'. Root files: $($candidates -join ', ')"
 }
 
 $pluginsDir = Join-Path $fiji.FullName "plugins"

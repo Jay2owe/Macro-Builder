@@ -85,7 +85,29 @@ If the updater asks about dependencies, only upload dependencies that are not al
 
 Do not upload core Fiji/ImageJ jars such as `jars/ij.jar`, Bio-Formats jars, or project plugins from the FLASH workspace. Macro Builder treats Fiji's ImageJ API as provided by the user installation.
 
-## 5. Clean Install Verification
+## 5. Stale Remote Lock
+
+If upload fails with:
+
+```text
+Could not obtain lock for db.xml.gz.lock
+```
+
+check whether the remote lock exists:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\clear-update-site-lock.ps1 -CheckOnly
+```
+
+If it exists, clear it with the ImageJ WebDAV upload password:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\clear-update-site-lock.ps1
+```
+
+Then restart Fiji, reopen the updater, and upload `plugins/Macro_Builder-0.1.1.jar` again.
+
+## 6. Clean Install Verification
 
 Use a separate clean Fiji install:
 
@@ -94,7 +116,7 @@ Use a separate clean Fiji install:
 3. Confirm the menu entry appears.
 4. Open the plugin and repeat the basic image/stack smoke test.
 
-## 6. Release Tag
+## 7. Release Tag
 
 After the uploaded build is verified:
 

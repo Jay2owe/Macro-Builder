@@ -30,7 +30,7 @@ if ($env:IMAGEJ_UPLOAD_USER) {
 }
 
 $fiji = Get-Item -LiteralPath $FijiDir
-$launcherNames = @("ImageJ-linux64", "ImageJ2-linux64", "ImageJ-linux64.sh", "ImageJ2-linux64.sh")
+$launcherNames = @("ImageJ-linux64", "ImageJ2-linux64", "fiji-linux-x64", "ImageJ-linux64.sh", "ImageJ2-linux64.sh")
 $launcher = $null
 foreach ($name in $launcherNames) {
     $candidate = Join-Path $fiji.FullName $name
@@ -42,7 +42,7 @@ foreach ($name in $launcherNames) {
 
 if (-not $launcher) {
     $launcher = Get-ChildItem -LiteralPath $fiji.FullName -Recurse -File -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -match "^ImageJ2?.*linux64" } |
+        Where-Object { $_.Name -match "^ImageJ2?.*linux64" -or $_.Name -eq "fiji-linux-x64" } |
         Select-Object -First 1 -ExpandProperty FullName
 }
 

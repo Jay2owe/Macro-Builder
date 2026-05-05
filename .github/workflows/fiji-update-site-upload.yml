@@ -67,7 +67,7 @@ jobs:
         run: |
           curl -fsSL https://downloads.imagej.net/fiji/latest/fiji-latest-linux64-jdk.zip -o fiji-linux64.zip
           unzip -q fiji-linux64.zip
-          FIJI_DIR="$(find . -maxdepth 4 -type d \( -name Fiji.app -o -name ImageJ2.app \) -print -quit)"
+          FIJI_DIR="$(find . -maxdepth 4 -type d -name "*.app" -print -quit)"
           test -n "$FIJI_DIR"
           if [ "$FIJI_DIR" != "./Fiji.app" ]; then
             mv "$FIJI_DIR" ./Fiji.app

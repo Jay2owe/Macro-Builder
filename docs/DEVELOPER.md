@@ -39,10 +39,12 @@ On macOS or Linux:
 The main plugin jar is:
 
 ```text
-target/Macro_Builder-0.1.0.jar
+target/Macro_Builder-0.1.1.jar
 ```
 
 Do not upload the generated `*-sources.jar` or `*-tests.jar` files to the ImageJ update site.
+
+The ImageJ API dependency is marked as `provided` because Fiji already supplies it. Do not change it back to compile/runtime scope unless the plugin is no longer distributed through Fiji.
 
 ## Fiji Menu Registration
 

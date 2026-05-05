@@ -14,7 +14,7 @@
 
     <groupId>io.github.jay2owe</groupId>
     <artifactId>macro-builder</artifactId>
-    <version>0.1.0</version>
+    <version>0.1.1</version>
 
     <name>Macro Builder</name>
     <description>Standalone ImageJ/Fiji plugin for building filter macros from a single image or stack.</description>
@@ -66,6 +66,7 @@
         <dependency>
             <groupId>net.imagej</groupId>
             <artifactId>ij</artifactId>
+            <scope>provided</scope>
         </dependency>
         <dependency>
             <groupId>junit</groupId>
@@ -81,7 +82,11 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-jar-plugin</artifactId>
                 <configuration>
+                    <excludes>
+                        <exclude>META-INF/maven/**</exclude>
+                    </excludes>
                     <archive>
+                        <addMavenDescriptor>false</addMavenDescriptor>
                         <manifest>
                             <addClasspath>false</addClasspath>
                         </manifest>

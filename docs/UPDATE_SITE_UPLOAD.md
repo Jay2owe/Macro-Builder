@@ -27,14 +27,14 @@ rg -n "<private-path-or-old-project-name>" . --glob "!target/**" --glob "!.git/*
 Expected upload artifact:
 
 ```text
-target/Macro_Builder-0.1.0.jar
+target/Macro_Builder-0.1.1.jar
 ```
 
 Do not upload:
 
 ```text
-target/Macro_Builder-0.1.0-sources.jar
-target/Macro_Builder-0.1.0-tests.jar
+target/Macro_Builder-0.1.1-sources.jar
+target/Macro_Builder-0.1.1-tests.jar
 ```
 
 ## 2. Local Fiji Test
@@ -74,14 +74,16 @@ If the upload action is missing, resolve pending Fiji downloads first, or mark u
 
 ## 4. Upload
 
-1. Make sure `Macro_Builder-0.1.0.jar` is in the local Fiji `plugins/` folder.
+1. Make sure `Macro_Builder-0.1.1.jar` is in the local Fiji `plugins/` folder.
 2. Open the updater's `Advanced Mode`.
 3. For a first upload, choose `View local-only files`.
-4. Select `plugins/Macro_Builder-0.1.0.jar`.
+4. Select `plugins/Macro_Builder-0.1.1.jar`.
 5. Choose `Upload to Macro-Builder`.
 6. Click `Apply Changes (upload)`.
 
 If the updater asks about dependencies, only upload dependencies that are not already part of Fiji. This plugin should not need extra dependency jars for the first release.
+
+Do not upload core Fiji/ImageJ jars such as `jars/ij.jar`, Bio-Formats jars, or project plugins from the FLASH workspace. Macro Builder treats Fiji's ImageJ API as provided by the user installation.
 
 ## 5. Clean Install Verification
 
@@ -97,6 +99,6 @@ Use a separate clean Fiji install:
 After the uploaded build is verified:
 
 ```powershell
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.1.1
+git push origin v0.1.1
 ```

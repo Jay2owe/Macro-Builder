@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.1 - 2026-05-05
+
+- Marked Fiji's ImageJ API as provided so the update-site uploader does not treat core Fiji jars as plugin dependencies.
+- Removed embedded Maven POM metadata from the plugin jar to avoid unnecessary dependency inference during upload.
+
 ## 0.1.0 - 2026-05-05
 
 - Initial standalone Macro Builder plugin.

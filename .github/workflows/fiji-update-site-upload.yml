@@ -67,7 +67,13 @@ jobs:
         run: |
           curl -fsSL https://downloads.imagej.net/fiji/latest/fiji-latest-linux64-jdk.zip -o fiji-linux64.zip
           unzip -q fiji-linux64.zip
-          test -x Fiji.app/ImageJ-linux64 || chmod +x Fiji.app/ImageJ-linux64
+          FIJI_DIR="$(find . -type d -name Fiji.app -print -quit)"
+          test -n "$FIJI_DIR"
+          if [ "$FIJI_DIR" != "./Fiji.app" ]; then
+            mv "$FIJI_DIR" ./Fiji.app
+          fi
+          test -f Fiji.app/ImageJ-linux64
+          chmod +x Fiji.app/ImageJ-linux64
 
       - name: Clear stale remote lock
         if: ${{ inputs.clear_stale_lock }}

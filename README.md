@@ -68,6 +68,7 @@ Restart Fiji after copying the jar.
 - [User guide](docs/USER_GUIDE.md)
 - [Developer guide](docs/DEVELOPER.md)
 - [Update-site upload checklist](docs/UPDATE_SITE_UPLOAD.md)
+- [GitHub Actions release automation](docs/GITHUB_ACTIONS_RELEASE.md)
 - [Changelog](CHANGELOG.md)
 
 ## License

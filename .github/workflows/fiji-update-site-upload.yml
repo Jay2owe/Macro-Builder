@@ -1,0 +1,111 @@
+name: Upload To Fiji Update Site
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Simulate the updater upload without changing the update site"
+        required: true
+        type: boolean
+        default: true
+      clear_stale_lock:
+        description: "Delete db.xml.gz.lock before upload using the WebDAV credentials"
+        required: true
+        type: boolean
+        default: false
+
+concurrency:
+  group: macro-builder-update-site-upload
+  cancel-in-progress: false
+
+jobs:
+  upload:
+    name: Build and upload
+    runs-on: ubuntu-latest
+    environment: fiji-update-site
+
+    env:
+      IMAGEJ_UPDATE_SITE_NAME: Macro-Builder
+      IMAGEJ_UPDATE_SITE_URL: https://sites.imagej.net/Macro-Builder/
+      IMAGEJ_UPLOAD_USER: ${{ secrets.IMAGEJ_UPLOAD_USER }}
+      IMAGEJ_UPLOAD_PASSWORD: ${{ secrets.IMAGEJ_UPLOAD_PASSWORD }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set default upload user
+        shell: bash
+        run: |
+          if [ -z "$IMAGEJ_UPLOAD_USER" ]; then
+            echo "IMAGEJ_UPLOAD_USER=Jay2owe" >> "$GITHUB_ENV"
+          fi
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "8"
+          cache: maven
+
+      - name: Validate secrets
+        shell: bash
+        run: |
+          test -n "$IMAGEJ_UPLOAD_PASSWORD" || {
+            echo "Missing repository secret: IMAGEJ_UPLOAD_PASSWORD"
+            exit 1
+          }
+
+      - name: Build and test
+        run: ./mvnw clean test -Denforcer.skip=true
+
+      - name: Build plugin jar
+        run: ./mvnw clean -DskipTests -Denforcer.skip=true package
+
+      - name: Download Fiji
+        shell: bash
+        run: |
+          curl -fsSL https://downloads.imagej.net/fiji/latest/fiji-linux64.zip -o fiji-linux64.zip
+          unzip -q fiji-linux64.zip
+          test -x Fiji.app/ImageJ-linux64 || chmod +x Fiji.app/ImageJ-linux64
+
+      - name: Clear stale remote lock
+        if: ${{ inputs.clear_stale_lock }}
+        shell: pwsh
+        run: |
+          ./scripts/clear-update-site-lock.ps1 `
+            -SiteUrl "$env:IMAGEJ_UPDATE_SITE_URL" `
+            -Username "$env:IMAGEJ_UPLOAD_USER"
+
+      - name: Require no remote lock
+        shell: pwsh
+        run: |
+          ./scripts/clear-update-site-lock.ps1 `
+            -SiteUrl "$env:IMAGEJ_UPDATE_SITE_URL" `
+            -Username "$env:IMAGEJ_UPLOAD_USER" `
+            -RequireAbsent
+
+      - name: Upload to Fiji update site
+        shell: pwsh
+        run: |
+          $dryRun = "${{ inputs.dry_run }}" -eq "true"
+          $args = @(
+            "-FijiDir", "Fiji.app",
+            "-SiteName", "$env:IMAGEJ_UPDATE_SITE_NAME",
+            "-SiteUrl", "$env:IMAGEJ_UPDATE_SITE_URL",
+            "-Username", "$env:IMAGEJ_UPLOAD_USER"
+          )
+          if ($dryRun) {
+            $args += "-DryRun"
+          }
+          ./scripts/upload-to-fiji-update-site.ps1 @args
+
+      - name: Upload built jar artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macro-builder-uploaded-jar
+          path: |
+            target/Macro_Builder-*.jar
+            !target/*-sources.jar
+            !target/*-tests.jar
+          if-no-files-found: error

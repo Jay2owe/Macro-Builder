@@ -1,7 +1,9 @@
 param(
     [string]$SiteUrl = "https://sites.imagej.net/Macro-Builder/",
     [string]$Username = "Jay2owe",
-    [switch]$CheckOnly
+    [string]$Password,
+    [switch]$CheckOnly,
+    [switch]$RequireAbsent
 )
 
 $ErrorActionPreference = "Stop"
@@ -44,13 +46,26 @@ if ($status -ne 200) {
 
 Write-Host "Remote lock exists at $lockUrl"
 
+if ($RequireAbsent) {
+    throw "Remote lock exists at $lockUrl. Clear it before uploading."
+}
+
 if ($CheckOnly) {
     exit 0
 }
 
-$credential = Get-Credential -UserName $Username -Message "ImageJ WebDAV upload credentials for $SiteUrl"
-$networkCredential = $credential.GetNetworkCredential()
-$pair = "{0}:{1}" -f $networkCredential.UserName, $networkCredential.Password
+if (-not $Password) {
+    $Password = $env:IMAGEJ_UPLOAD_PASSWORD
+}
+
+if (-not $Password) {
+    $credential = Get-Credential -UserName $Username -Message "ImageJ WebDAV upload credentials for $SiteUrl"
+    $networkCredential = $credential.GetNetworkCredential()
+    $Username = $networkCredential.UserName
+    $Password = $networkCredential.Password
+}
+
+$pair = "{0}:{1}" -f $Username, $Password
 $basic = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes($pair))
 $headers = @{ Authorization = "Basic $basic" }
 

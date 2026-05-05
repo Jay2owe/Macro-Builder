@@ -74,6 +74,16 @@ If the upload action is missing, resolve pending Fiji downloads first, or mark u
 
 ## 4. Upload
 
+Use the manual GitHub Actions workflow when possible:
+
+1. Open GitHub Actions in the public repository.
+2. Run `Upload To Fiji Update Site`.
+3. Keep `dry_run=true` for a simulation, or set `dry_run=false` for a real upload.
+
+See [GitHub Actions release automation](GITHUB_ACTIONS_RELEASE.md).
+
+Manual Fiji upload is still available:
+
 1. Make sure `Macro_Builder-0.1.1.jar` is in the local Fiji `plugins/` folder.
 2. Open the updater's `Advanced Mode`.
 3. For a first upload, choose `View local-only files`.

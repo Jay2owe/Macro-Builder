@@ -101,16 +101,16 @@ jobs:
         shell: pwsh
         run: |
           $dryRun = "${{ inputs.dry_run }}" -eq "true"
-          $args = @(
-            "-FijiDir", "Fiji.app",
-            "-SiteName", "$env:IMAGEJ_UPDATE_SITE_NAME",
-            "-SiteUrl", "$env:IMAGEJ_UPDATE_SITE_URL",
-            "-Username", "$env:IMAGEJ_UPLOAD_USER"
-          )
-          if ($dryRun) {
-            $args += "-DryRun"
+          $uploadArgs = @{
+            FijiDir = "Fiji.app"
+            SiteName = "$env:IMAGEJ_UPDATE_SITE_NAME"
+            SiteUrl = "$env:IMAGEJ_UPDATE_SITE_URL"
+            Username = "$env:IMAGEJ_UPLOAD_USER"
           }
-          ./scripts/upload-to-fiji-update-site.ps1 @args
+          if ($dryRun) {
+            $uploadArgs.DryRun = $true
+          }
+          ./scripts/upload-to-fiji-update-site.ps1 @uploadArgs
 
       - name: Upload built jar artifact
         uses: actions/upload-artifact@v4

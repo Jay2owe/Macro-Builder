@@ -65,7 +65,7 @@ jobs:
       - name: Download Fiji
         shell: bash
         run: |
-          curl -fsSL https://downloads.imagej.net/fiji/latest/fiji-linux64.zip -o fiji-linux64.zip
+          curl -fsSL https://downloads.imagej.net/fiji/latest/fiji-latest-linux64-jdk.zip -o fiji-linux64.zip
           unzip -q fiji-linux64.zip
           test -x Fiji.app/ImageJ-linux64 || chmod +x Fiji.app/ImageJ-linux64
 

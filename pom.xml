@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+        http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>org.scijava</groupId>
+        <artifactId>pom-scijava</artifactId>
+        <version>31.1.0</version>
+        <relativePath/>
+    </parent>
+
+    <groupId>io.github.jay2owe</groupId>
+    <artifactId>macro-builder</artifactId>
+    <version>0.1.0</version>
+
+    <name>Macro Builder</name>
+    <description>Standalone ImageJ/Fiji plugin for building filter macros from a single image or stack.</description>
+    <url>https://github.com/Jay2owe/Macro-Builder</url>
+    <inceptionYear>2026</inceptionYear>
+
+    <properties>
+        <main-class>macro.builder.Macro_Builder</main-class>
+        <license.licenseName>cc0</license.licenseName>
+        <license.copyrightOwners>Jamie Malcolm</license.copyrightOwners>
+    </properties>
+
+    <licenses>
+        <license>
+            <name>CC0 1.0 Universal</name>
+            <url>https://creativecommons.org/publicdomain/zero/1.0/</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+
+    <developers>
+        <developer>
+            <id>jay2owe</id>
+            <name>Jamie Malcolm</name>
+            <url>https://github.com/jay2owe</url>
+        </developer>
+    </developers>
+
+    <scm>
+        <connection>scm:git:https://github.com/Jay2owe/Macro-Builder.git</connection>
+        <developerConnection>scm:git:git@github.com:Jay2owe/Macro-Builder.git</developerConnection>
+        <tag>HEAD</tag>
+        <url>https://github.com/Jay2owe/Macro-Builder</url>
+    </scm>
+
+    <issueManagement>
+        <system>GitHub Issues</system>
+        <url>https://github.com/Jay2owe/Macro-Builder/issues</url>
+    </issueManagement>
+
+    <repositories>
+        <repository>
+            <id>scijava.public</id>
+            <url>https://maven.scijava.org/content/groups/public</url>
+        </repository>
+    </repositories>
+
+    <dependencies>
+        <dependency>
+            <groupId>net.imagej</groupId>
+            <artifactId>ij</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>junit</groupId>
+            <artifactId>junit</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <finalName>Macro_Builder-${project.version}</finalName>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <configuration>
+                    <archive>
+                        <manifest>
+                            <addClasspath>false</addClasspath>
+                        </manifest>
+                    </archive>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

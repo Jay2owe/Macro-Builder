@@ -39,7 +39,7 @@ On macOS or Linux:
 The main plugin jar is:
 
 ```text
-target/Macro_Builder-0.1.1.jar
+target/Macro_Builder-0.1.2.jar
 ```
 
 Do not upload the generated `*-sources.jar` or `*-tests.jar` files to the ImageJ update site.
@@ -64,7 +64,7 @@ The jar name intentionally contains an underscore (`Macro_Builder-...jar`) becau
 
 ## Bio-Formats
 
-The plugin first opens files with `IJ.openImage`. If that fails, it tries Fiji's `Bio-Formats Importer` command by name.
+The plugin opens ordinary image files with `IJ.openImage`. Known microscope container files and selected directories go straight to Fiji's `Bio-Formats Importer` command by name, with only the `open=[path]` option, so Bio-Formats can show its native series/image chooser. If Bio-Formats opens more than one image window, Macro Builder asks which imported image should become the selected source and closes the other imported images.
 
 Keep Bio-Formats optional unless a future change truly needs compile-time Bio-Formats APIs. A normal Fiji installation already provides Bio-Formats at runtime.
 

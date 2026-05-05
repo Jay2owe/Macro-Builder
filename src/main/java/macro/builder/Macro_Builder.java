@@ -17,6 +17,7 @@ import javax.swing.JButton;
 import javax.swing.JDialog;
 import javax.swing.JFileChooser;
 import javax.swing.JLabel;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
@@ -31,6 +32,9 @@ import java.awt.GraphicsEnvironment;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
 
 public class Macro_Builder implements PlugIn {
 
@@ -62,6 +66,10 @@ public class Macro_Builder implements PlugIn {
         private String lastMacro;
         private String lastMacroSource = "none";
         private DagIR lastDag;
+        private static final String[] BIO_FORMATS_CONTAINER_EXTENSIONS = {
+                "lif", "czi", "nd2", "oib", "oif", "lsm", "zvi", "ome",
+                "ims", "vsi", "lei", "mvd2", "mrxs", "svs", "scn"
+        };
 
         SessionDialog() {
             buildUi();
@@ -89,7 +97,7 @@ public class Macro_Builder implements PlugIn {
 
             JPanel imageButtons = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
             JButton current = new JButton("Use current Fiji image");
-            JButton open = new JButton("Open image/stack...");
+            JButton open = new JButton("Open image/container...");
             current.addActionListener(e -> useCurrentImage(true));
             open.addActionListener(e -> openImageFromDisk());
             imageButtons.add(current);
@@ -118,7 +126,7 @@ public class Macro_Builder implements PlugIn {
             JButton build = new JButton("Build step-by-step");
             JButton record = new JButton("Record in Fiji");
             JButton preview = new JButton("Preview macro");
-            JButton run = new JButton("Run macro on current image");
+            JButton run = new JButton("Run macro on selected image");
             build.addActionListener(e -> openSandbox());
             record.addActionListener(e -> openRecorder());
             preview.addActionListener(e -> previewLastMacro());
@@ -164,68 +172,118 @@ public class Macro_Builder implements PlugIn {
 
         private void openImageFromDisk() {
             JFileChooser chooser = new JFileChooser();
-            chooser.setDialogTitle("Open Image or Stack");
-            chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
+            chooser.setDialogTitle("Open Image, Folder, or Container");
+            chooser.setFileSelectionMode(JFileChooser.FILES_AND_DIRECTORIES);
             chooser.addChoosableFileFilter(new FileNameExtensionFilter(
                     "Image files", "tif", "tiff", "png", "jpg", "jpeg", "gif", "bmp", "ics", "ids"));
             chooser.addChoosableFileFilter(new FileNameExtensionFilter(
-                    "Bio-Formats containers", "lif", "czi", "nd2", "oib", "oif", "lsm", "zvi", "ome"));
+                    "Bio-Formats containers", "lif", "czi", "nd2", "oib", "oif", "lsm", "zvi", "ome",
+                    "ims", "vsi", "lei", "mvd2", "mrxs", "svs", "scn"));
             if (chooser.showOpenDialog(dialog) != JFileChooser.APPROVE_OPTION) return;
             File selected = chooser.getSelectedFile();
-            ImagePlus opened = openImageOrContainer(selected);
-            if (opened == null) {
-                IJ.showMessage("Macro Builder", "Fiji could not open that file as an image or stack.\n\n"
-                        + "For microscope containers, this requires Fiji's Bio-Formats plugin. "
-                        + "Some files may also ask you to choose a series before opening.");
+            OpenAttempt opened = openImageOrContainer(selected);
+            if (opened.cancelled) return;
+            if (opened.image == null) {
+                IJ.showMessage("Macro Builder", opened.message == null
+                        ? "Fiji could not open that file as an image or stack.\n\n"
+                                + "For microscope containers, this requires Fiji's Bio-Formats plugin."
+                        : opened.message);
                 return;
             }
-            sourceImage = opened;
+            sourceImage = opened.image;
             refreshImageLabel();
         }
 
-        private ImagePlus openImageOrContainer(File selected) {
+        private OpenAttempt openImageOrContainer(File selected) {
+            if (selected == null) return OpenAttempt.cancelled();
+            if (shouldOpenWithBioFormatsChooser(selected)) {
+                return openWithBioFormats(selected);
+            }
+
             String path = selected.getAbsolutePath();
             ImagePlus opened = IJ.openImage(path);
             if (opened != null) {
                 opened.show();
                 setStatus("Opened " + selected.getName() + ".");
-                return opened;
+                return OpenAttempt.opened(opened);
             }
 
-            opened = openWithBioFormats(path);
-            if (opened != null) {
-                setStatus("Opened " + selected.getName() + " with Bio-Formats.");
+            return openWithBioFormats(selected);
+        }
+
+        private OpenAttempt openWithBioFormats(File selected) {
+            String path = selected.getAbsolutePath();
+            int[] beforeIds = WindowManager.getIDList();
+            try {
+                IJ.run("Bio-Formats Importer", "open=[" + path + "]");
+            } catch (Throwable t) {
+                IJ.log("Macro Builder: Bio-Formats fallback failed: " + cleanMessage(t));
+                return OpenAttempt.failed("Fiji could not open that file with Bio-Formats.\n\n"
+                        + "A normal Fiji installation includes Bio-Formats, but this Fiji instance may not.\n\n"
+                        + cleanMessage(t));
+            }
+
+            List<ImagePlus> opened = findOpenedImages(beforeIds);
+            if (opened.isEmpty()) {
+                setStatus("No image was selected from " + selected.getName() + ".");
+                return OpenAttempt.cancelled();
+            }
+
+            ImagePlus chosen = chooseOpenedImage(opened);
+            if (chosen == null) {
+                setStatus("No imported image was selected.");
+                return OpenAttempt.cancelled();
+            }
+            closeUnchosenImages(opened, chosen);
+            if (chosen.getWindow() == null) chosen.show();
+            if (chosen.getWindow() != null) WindowManager.setCurrentWindow(chosen.getWindow());
+            setStatus("Opened " + chosen.getTitle() + " from " + selected.getName() + " with Bio-Formats.");
+            return OpenAttempt.opened(chosen);
+        }
+
+        private ImagePlus chooseOpenedImage(List<ImagePlus> opened) {
+            if (opened.size() == 1) return opened.get(0);
+            ImageChoice[] choices = new ImageChoice[opened.size()];
+            for (int i = 0; i < opened.size(); i++) {
+                choices[i] = new ImageChoice(opened.get(i));
+            }
+            Object selected = JOptionPane.showInputDialog(dialog,
+                    "Choose the image Macro Builder should use:",
+                    "Macro Builder",
+                    JOptionPane.PLAIN_MESSAGE,
+                    null,
+                    choices,
+                    choices[0]);
+            return selected instanceof ImageChoice ? ((ImageChoice) selected).image : null;
+        }
+
+        private static List<ImagePlus> findOpenedImages(int[] beforeIds) {
+            List<ImagePlus> opened = new ArrayList<ImagePlus>();
+            int[] afterIds = WindowManager.getIDList();
+            if (afterIds == null) return opened;
+            for (int afterId : afterIds) {
+                if (!containsId(beforeIds, afterId)) {
+                    ImagePlus imp = WindowManager.getImage(afterId);
+                    if (imp != null) opened.add(imp);
+                }
             }
             return opened;
         }
 
-        private ImagePlus openWithBioFormats(String path) {
-            ImagePlus before = WindowManager.getCurrentImage();
-            int[] beforeIds = WindowManager.getIDList();
-            try {
-                IJ.run("Bio-Formats Importer",
-                        "open=[" + path + "] autoscale color_mode=Default view=Hyperstack stack_order=XYCZT");
-            } catch (Throwable t) {
-                IJ.log("Macro Builder: Bio-Formats fallback failed: " + cleanMessage(t));
-                return null;
+        private static void closeUnchosenImages(List<ImagePlus> opened, ImagePlus chosen) {
+            for (ImagePlus imp : opened) {
+                if (imp != chosen) closeImageQuietly(imp);
             }
-
-            ImagePlus current = WindowManager.getCurrentImage();
-            if (current != null && current != before) {
-                return current;
-            }
-            return findOpenedImage(beforeIds);
         }
 
-        private static ImagePlus findOpenedImage(int[] beforeIds) {
-            int[] afterIds = WindowManager.getIDList();
-            if (afterIds == null) return null;
-            for (int i = afterIds.length - 1; i >= 0; i--) {
-                if (!containsId(beforeIds, afterIds[i])) {
-                    return WindowManager.getImage(afterIds[i]);
-                }
+        private static boolean shouldOpenWithBioFormatsChooser(File selected) {
+            if (selected.isDirectory()) return true;
+            String name = selected.getName().toLowerCase(Locale.ROOT);
+            if (name.endsWith(".ome.tif") || name.endsWith(".ome.tiff")) return true;
+            for (String extension : BIO_FORMATS_CONTAINER_EXTENSIONS) {
+                if (name.endsWith("." + extension)) return true;
             }
-            return null;
+            return false;
         }
 
         private static boolean containsId(int[] ids, int id) {
@@ -241,9 +299,7 @@ public class Macro_Builder implements PlugIn {
                 imageLabel.setText("No image selected.");
                 return;
             }
-            imageLabel.setText("Selected: " + sourceImage.getTitle()
-                    + " (" + sourceImage.getWidth() + " x " + sourceImage.getHeight()
-                    + ", slices=" + sourceImage.getStackSize() + ")");
+            imageLabel.setText("Selected: " + describeImage(sourceImage));
         }
 
         private boolean ensureImage() {
@@ -470,6 +526,17 @@ public class Macro_Builder implements PlugIn {
             sourceLabel.setText("Macro source: " + lastMacroSource);
         }
 
+        private static String describeImage(ImagePlus imp) {
+            if (imp == null) return "No image";
+            String title = imp.getTitle() == null || imp.getTitle().trim().isEmpty()
+                    ? "Untitled"
+                    : imp.getTitle();
+            return title + " (" + imp.getWidth() + " x " + imp.getHeight()
+                    + ", C=" + Math.max(1, imp.getNChannels())
+                    + ", Z=" + Math.max(1, imp.getNSlices())
+                    + ", T=" + Math.max(1, imp.getNFrames()) + ")";
+        }
+
         private static ImagePlus duplicateImage(ImagePlus source, String title) {
             if (source == null) return null;
             ImagePlus copy = new Duplicator().run(source,
@@ -513,6 +580,42 @@ public class Macro_Builder implements PlugIn {
                 home = System.getProperty("user.home");
             }
             return new File(home, ".macro-builder");
+        }
+
+        private static final class OpenAttempt {
+            final ImagePlus image;
+            final boolean cancelled;
+            final String message;
+
+            private OpenAttempt(ImagePlus image, boolean cancelled, String message) {
+                this.image = image;
+                this.cancelled = cancelled;
+                this.message = message;
+            }
+
+            static OpenAttempt opened(ImagePlus image) {
+                return new OpenAttempt(image, false, null);
+            }
+
+            static OpenAttempt cancelled() {
+                return new OpenAttempt(null, true, null);
+            }
+
+            static OpenAttempt failed(String message) {
+                return new OpenAttempt(null, false, message);
+            }
+        }
+
+        private static final class ImageChoice {
+            final ImagePlus image;
+
+            ImageChoice(ImagePlus image) {
+                this.image = image;
+            }
+
+            @Override public String toString() {
+                return describeImage(image);
+            }
         }
 
         private static String cleanMessage(Throwable t) {

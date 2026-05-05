@@ -1,6 +1,6 @@
 # Macro Builder
 
-Macro Builder is a standalone Fiji/ImageJ plugin for building ImageJ macro (`.ijm`) filter steps from one image or image stack. It opens from `Plugins > Macro Builder > Macro Builder` and provides a small desktop UI for selecting an open Fiji image or opening a single image/stack from disk.
+Macro Builder is a standalone Fiji/ImageJ plugin for building ImageJ macro (`.ijm`) filter steps from one image or image stack. It opens from `Plugins > Macro Builder > Macro Builder` and provides a small desktop UI for selecting an open Fiji image or opening a single image, folder, stack, or microscope container from disk.
 
 The plugin is intentionally standalone. It does not include a bin-analysis importer, channel setup workflow, batch import workflow, or any project-specific analysis setup.
 
@@ -24,12 +24,12 @@ After restart, launch the plugin from `Plugins > Macro Builder > Macro Builder`.
 
 ## Basic Use
 
-1. Open an image or stack in Fiji, or click `Open image/stack...` inside Macro Builder.
+1. Open an image or stack in Fiji, or click `Open image/container...` inside Macro Builder.
 2. Use `Build step-by-step` to build a visual filter pipeline, or `Record in Fiji` to record ImageJ macro actions.
-3. Use `Preview macro` or `Run macro on current image` to test the generated macro on a duplicate image.
+3. Use `Preview macro` or `Run macro on selected image` to test the generated macro on a duplicate image.
 4. Use `Save macro...` to export the generated `.ijm` file.
 
-For microscope container formats such as `.czi`, `.lif`, `.nd2`, `.oib`, `.oif`, `.lsm`, or `.zvi`, Fiji's Bio-Formats plugin must be available. Standard Fiji installations normally include it.
+For microscope container formats such as `.czi`, `.lif`, `.nd2`, `.oib`, `.oif`, `.lsm`, or `.zvi`, Fiji's Bio-Formats plugin must be available. Standard Fiji installations normally include it. Container files and folder-style datasets open through the Bio-Formats chooser, so you can select the specific series/image to use before running Macro Builder.
 
 ## Build From Source
 
@@ -50,7 +50,7 @@ On macOS or Linux:
 The uploadable plugin jar is written to:
 
 ```text
-target/Macro_Builder-0.1.1.jar
+target/Macro_Builder-0.1.2.jar
 ```
 
 ## Local Fiji Smoke Test

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.2 - 2026-05-06
+
+- Added folder/container opening through Bio-Formats so users can choose the specific series/image inside LIF and other microscope containers before using Macro Builder.
+
 ## 0.1.1 - 2026-05-05
 
 - Marked Fiji's ImageJ API as provided so the update-site uploader does not treat core Fiji jars as plugin dependencies.

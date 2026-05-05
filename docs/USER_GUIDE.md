@@ -8,14 +8,16 @@ After installation, restart Fiji and choose:
 Plugins > Macro Builder > Macro Builder
 ```
 
-Macro Builder opens as a small dialog. It can use the currently active Fiji image, or it can open one image or image stack from disk.
+Macro Builder opens as a small dialog. It can use the currently active Fiji image, or it can open one image, folder, image stack, or microscope container from disk.
 
 ## Select An Image
 
 - `Use current Fiji image` selects the active image window in Fiji.
-- `Open image/stack...` opens one image or stack from disk.
+- `Open image/container...` opens one image, folder, stack, or microscope container from disk.
 
 Supported direct image formats include TIFF, PNG, JPEG, GIF, BMP, ICS, and IDS. For microscope containers such as CZI, LIF, ND2, OIB, OIF, LSM, ZVI, and OME files, Fiji's Bio-Formats plugin must be installed.
+
+When you select a container file or folder-style dataset, Macro Builder opens Fiji's Bio-Formats chooser. Use that dialog to select the series/image inside the container. If Bio-Formats opens more than one image, Macro Builder asks which imported image it should use as the selected source.
 
 ## Build A Macro
 
@@ -29,7 +31,7 @@ The generated macro appears in the `Last built macro` panel.
 ## Test A Macro
 
 - `Preview macro` runs the current macro against a duplicate preview image.
-- `Run macro on current image` runs the current macro on a duplicate of the selected source image.
+- `Run macro on selected image` runs the current macro on a duplicate of the selected source image.
 
 The source image is not modified by these test actions.
 

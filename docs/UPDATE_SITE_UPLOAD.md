@@ -27,14 +27,14 @@ rg -n "<private-path-or-old-project-name>" . --glob "!target/**" --glob "!.git/*
 Expected upload artifact:
 
 ```text
-target/Macro_Builder-0.1.1.jar
+target/Macro_Builder-0.1.2.jar
 ```
 
 Do not upload:
 
 ```text
-target/Macro_Builder-0.1.1-sources.jar
-target/Macro_Builder-0.1.1-tests.jar
+target/Macro_Builder-0.1.2-sources.jar
+target/Macro_Builder-0.1.2-tests.jar
 ```
 
 ## 2. Local Fiji Test
@@ -50,12 +50,12 @@ Restart Fiji and verify:
 - `Plugins > Macro Builder > Macro Builder` appears.
 - The dialog opens.
 - `Use current Fiji image` works.
-- `Open image/stack...` works for a 2D image and a TIFF stack.
+- `Open image/container...` works for a 2D image, a TIFF stack, and a Bio-Formats container or folder-style dataset.
 - `Build step-by-step` can create and preview a macro.
 - `Record in Fiji` can record and preview a macro.
 - `Save macro...` writes an `.ijm` file.
 - Visual-builder macros also write a `.dag.json` sidecar.
-- `Run macro on current image` runs on a duplicate, not the source image.
+- `Run macro on selected image` runs on a duplicate, not the source image.
 - A microscope container format opens through Bio-Formats if you have a test file.
 
 ## 3. Configure The Update Site
@@ -84,10 +84,10 @@ See [GitHub Actions release automation](GITHUB_ACTIONS_RELEASE.md).
 
 Manual Fiji upload is still available:
 
-1. Make sure `Macro_Builder-0.1.1.jar` is in the local Fiji `plugins/` folder.
+1. Make sure `Macro_Builder-0.1.2.jar` is in the local Fiji `plugins/` folder.
 2. Open the updater's `Advanced Mode`.
 3. For a first upload, choose `View local-only files`.
-4. Select `plugins/Macro_Builder-0.1.1.jar`.
+4. Select `plugins/Macro_Builder-0.1.2.jar`.
 5. Choose `Upload to Macro-Builder`.
 6. Click `Apply Changes (upload)`.
 
@@ -115,7 +115,7 @@ If it exists, clear it with the ImageJ WebDAV upload password:
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\clear-update-site-lock.ps1
 ```
 
-Then restart Fiji, reopen the updater, and upload `plugins/Macro_Builder-0.1.1.jar` again.
+Then restart Fiji, reopen the updater, and upload `plugins/Macro_Builder-0.1.2.jar` again.
 
 ## 6. Clean Install Verification
 
@@ -124,13 +124,13 @@ Use a separate clean Fiji install:
 1. Add the unlisted `Macro-Builder` update site URL.
 2. Apply changes and restart Fiji.
 3. Confirm the menu entry appears.
-4. Open the plugin and repeat the basic image/stack smoke test.
+4. Open the plugin and repeat the basic image/container smoke test.
 
 ## 7. Release Tag
 
 After the uploaded build is verified:
 
 ```powershell
-git tag v0.1.1
-git push origin v0.1.1
+git tag v0.1.2
+git push origin v0.1.2
 ```

@@ -67,8 +67,15 @@ jobs:
         run: |
           curl -fsSL https://downloads.imagej.net/fiji/latest/fiji-latest-linux64-jdk.zip -o fiji-linux64.zip
           unzip -q fiji-linux64.zip
-          FIJI_DIR="$(find . -maxdepth 4 -type d -name "*.app" -print -quit)"
-          test -n "$FIJI_DIR"
+          FIJI_DIR="$(find . -maxdepth 5 -type f \( -name "ImageJ*linux64*" -o -name "ImageJ2*linux64*" \) -printf "%h\n" | head -n 1)"
+          if [ -z "$FIJI_DIR" ]; then
+            FIJI_DIR="$(find . -maxdepth 4 -type d -name "*.app" -print -quit)"
+          fi
+          if [ -z "$FIJI_DIR" ]; then
+            echo "Could not locate extracted Fiji/ImageJ directory."
+            unzip -Z1 fiji-linux64.zip | head -n 80
+            exit 1
+          fi
           if [ "$FIJI_DIR" != "./Fiji.app" ]; then
             mv "$FIJI_DIR" ./Fiji.app
           fi

@@ -4,6 +4,8 @@ import ij.IJ;
 import ij.ImagePlus;
 import ij.WindowManager;
 import ij.plugin.Duplicator;
+import macro.builder.analysis.BatchShootoutResult;
+import macro.builder.analysis.BatchShootoutRunner;
 import macro.builder.analysis.ObjectCounter;
 import macro.builder.analysis.ShootoutResult;
 import macro.builder.analysis.ShootoutSettings;
@@ -22,6 +24,7 @@ import javax.swing.JScrollPane;
 import javax.swing.JTable;
 import javax.swing.JTextField;
 import javax.swing.ListSelectionModel;
+import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
 import javax.swing.WindowConstants;
 import javax.swing.event.ListSelectionEvent;
@@ -79,10 +82,14 @@ public final class ThresholdShootoutDialog {
     private final JButton runButton = new JButton("Run");
     private final JButton previewButton = new JButton("Open mask preview");
     private final JButton exportButton = new JButton("Export CSV...");
+    private final JButton batchButton = new JButton("Run batch...");
+    private final JButton cancelBatchButton = new JButton("Cancel batch");
 
     private List<ShootoutResult> results = Collections.emptyList();
     private ImagePlus activeMaskPreview;
     private SwingWorker<List<ShootoutResult>, Void> worker;
+    private SwingWorker<BatchRunResult, Void> batchWorker;
+    private volatile boolean batchCancelRequested;
     private boolean closed;
 
     private ThresholdShootoutDialog(Window owner, ImagePlus source, String macro) {
@@ -157,6 +164,8 @@ public final class ThresholdShootoutDialog {
         JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
         left.add(previewButton);
         left.add(exportButton);
+        left.add(batchButton);
+        left.add(cancelBatchButton);
 
         JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
         JButton closeButton = new JButton("Close");
@@ -175,6 +184,16 @@ public final class ThresholdShootoutDialog {
                 exportCsv();
             }
         });
+        batchButton.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                runBatchShootout();
+            }
+        });
+        cancelBatchButton.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                cancelBatchShootout();
+            }
+        });
         closeButton.addActionListener(new ActionListener() {
             @Override public void actionPerformed(ActionEvent e) {
                 dialog.dispose();
@@ -190,6 +209,7 @@ public final class ThresholdShootoutDialog {
         dialog.addWindowListener(new WindowAdapter() {
             @Override public void windowClosed(WindowEvent e) {
                 closed = true;
+                batchCancelRequested = true;
                 closeImageQuietly(activeMaskPreview);
                 activeMaskPreview = null;
                 closeResultImages(results);
@@ -473,6 +493,156 @@ public final class ThresholdShootoutDialog {
         }
     }
 
+    private void runBatchShootout() {
+        if (isBusy()) return;
+
+        final ShootoutSettings settings;
+        try {
+            settings = buildSettings();
+        } catch (IllegalArgumentException ex) {
+            IJ.showMessage("Test Counts", cleanMessage(ex));
+            return;
+        }
+
+        List<File> selectedInputs = chooseBatchInputs();
+        if (selectedInputs.isEmpty()) return;
+        final List<File> batchFiles = BatchShootoutRunner.collectBatchFiles(selectedInputs);
+        if (batchFiles.isEmpty()) {
+            IJ.showMessage("Test Counts", "No ordinary image files or Bio-Formats containers were selected.");
+            return;
+        }
+
+        final File csvFile = chooseBatchCsvFile();
+        if (csvFile == null) return;
+
+        batchCancelRequested = false;
+        statusLabel.setText("Starting batch count shootout...");
+        batchWorker = new SwingWorker<BatchRunResult, Void>() {
+            @Override protected BatchRunResult doInBackground() throws Exception {
+                List<BatchShootoutResult> rows = new BatchShootoutRunner().run(
+                        batchFiles,
+                        macro,
+                        settings,
+                        new BatchShootoutRunner.Progress() {
+                            @Override public void onStarted(int totalFiles) {
+                                setBatchStatus("Batch count shootout: " + totalFiles + " file(s).");
+                            }
+
+                            @Override public void onFileStarted(File file, int index, int totalFiles) {
+                                setBatchStatus("Batch " + index + "/" + totalFiles + ": " + file.getName());
+                            }
+
+                            @Override public void onFileFinished(
+                                    File file,
+                                    int index,
+                                    int totalFiles,
+                                    int rowCount) {
+                                setBatchStatus("Batch " + index + "/" + totalFiles
+                                        + " complete: " + rowCount + " row(s).");
+                            }
+
+                            @Override public boolean isCancelled() {
+                                return batchCancelRequested;
+                            }
+                        });
+                Files.write(csvFile.toPath(), BatchShootoutRunner.buildCsv(rows).getBytes(StandardCharsets.UTF_8));
+                return new BatchRunResult(rows, csvFile, batchCancelRequested);
+            }
+
+            @Override protected void done() {
+                onBatchShootoutDone(this);
+            }
+        };
+        updateControlState();
+        batchWorker.execute();
+    }
+
+    private List<File> chooseBatchInputs() {
+        JFileChooser chooser = new JFileChooser();
+        chooser.setDialogTitle("Choose Batch Images or Folder");
+        chooser.setFileSelectionMode(JFileChooser.FILES_AND_DIRECTORIES);
+        chooser.setMultiSelectionEnabled(true);
+        chooser.addChoosableFileFilter(new FileNameExtensionFilter(
+                "Image files (*.tif, *.tiff, *.png, *.jpg, *.gif, *.bmp, *.ics, *.ids)",
+                BatchShootoutRunner.DIRECT_IMAGE_EXTENSIONS));
+        if (chooser.showOpenDialog(dialog) != JFileChooser.APPROVE_OPTION) {
+            return Collections.emptyList();
+        }
+
+        File[] selected = chooser.getSelectedFiles();
+        List<File> inputs = new ArrayList<File>();
+        if (selected != null && selected.length > 0) {
+            Collections.addAll(inputs, selected);
+        } else if (chooser.getSelectedFile() != null) {
+            inputs.add(chooser.getSelectedFile());
+        }
+        return inputs;
+    }
+
+    private File chooseBatchCsvFile() {
+        JFileChooser chooser = new JFileChooser();
+        chooser.setDialogTitle("Save Batch Count Shootout CSV");
+        chooser.setSelectedFile(new File("Macro_Builder_Batch_Count_Shootout.csv"));
+        chooser.addChoosableFileFilter(new FileNameExtensionFilter("CSV files (*.csv)", "csv"));
+        if (chooser.showSaveDialog(dialog) != JFileChooser.APPROVE_OPTION) return null;
+        return ensureExtension(chooser.getSelectedFile(), ".csv");
+    }
+
+    private void cancelBatchShootout() {
+        if (!isBatchBusy()) return;
+        batchCancelRequested = true;
+        statusLabel.setText("Cancelling batch after the current file...");
+        updateControlState();
+    }
+
+    private void onBatchShootoutDone(SwingWorker<BatchRunResult, Void> finishedWorker) {
+        BatchRunResult result = null;
+        String failure = null;
+        try {
+            result = finishedWorker.get();
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            failure = "Batch count shootout interrupted.";
+        } catch (ExecutionException ex) {
+            failure = "Batch count shootout failed: " + cleanMessage(ex.getCause());
+        }
+
+        if (finishedWorker == batchWorker) {
+            batchWorker = null;
+        }
+        batchCancelRequested = false;
+
+        if (closed || !dialog.isDisplayable()) {
+            return;
+        }
+
+        if (failure != null) {
+            statusLabel.setText(failure);
+            updateControlState();
+            return;
+        }
+
+        String prefix = result.cancelled ? "Batch cancelled" : "Batch complete";
+        statusLabel.setText(prefix + ": " + result.rows.size()
+                + " row(s) saved to " + result.csvFile.getName() + ".");
+        updateControlState();
+    }
+
+    private void setBatchStatus(final String text) {
+        if (closed || text == null) return;
+        if (SwingUtilities.isEventDispatchThread()) {
+            statusLabel.setText(text);
+            return;
+        }
+        SwingUtilities.invokeLater(new Runnable() {
+            @Override public void run() {
+                if (!closed && dialog.isDisplayable()) {
+                    statusLabel.setText(text);
+                }
+            }
+        });
+    }
+
     private static String buildCsv(List<ShootoutResult> rows) {
         StringBuilder csv = new StringBuilder();
         csv.append("Variant,Count mode,Threshold value,Count,Mean size,Coverage %,Range,Status\n");
@@ -515,13 +685,23 @@ public final class ThresholdShootoutDialog {
         brightObjects.setEnabled(!busy && usesAuto(mode));
         runButton.setEnabled(!busy);
         exportButton.setEnabled(!busy && !results.isEmpty());
+        batchButton.setEnabled(!busy);
+        cancelBatchButton.setEnabled(isBatchBusy() && !batchCancelRequested);
 
         ShootoutResult selected = selectedResult();
         previewButton.setEnabled(!busy && selected != null && selected.isSuccess() && selected.maskPreview != null);
     }
 
     private boolean isBusy() {
+        return isShootoutBusy() || isBatchBusy();
+    }
+
+    private boolean isShootoutBusy() {
         return worker != null && !worker.isDone();
+    }
+
+    private boolean isBatchBusy() {
+        return batchWorker != null && !batchWorker.isDone();
     }
 
     private static boolean usesAuto(ShootoutSettings.ThresholdMode mode) {
@@ -634,6 +814,18 @@ public final class ThresholdShootoutDialog {
     private static String cleanMessage(String message) {
         if (message == null || message.trim().isEmpty()) return "Unknown error";
         return message.trim().replace('\n', ' ').replace('\r', ' ');
+    }
+
+    private static final class BatchRunResult {
+        final List<BatchShootoutResult> rows;
+        final File csvFile;
+        final boolean cancelled;
+
+        BatchRunResult(List<BatchShootoutResult> rows, File csvFile, boolean cancelled) {
+            this.rows = rows == null ? Collections.<BatchShootoutResult>emptyList() : rows;
+            this.csvFile = csvFile;
+            this.cancelled = cancelled;
+        }
     }
 
     private static final class ResultTableModel extends AbstractTableModel {

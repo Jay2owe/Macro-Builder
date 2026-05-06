@@ -5,6 +5,7 @@ import macro.builder.image.dag.DagIR;
 import macro.builder.image.dag.DagIRSerializer;
 import macro.builder.ui.MacroPreviewHandler;
 import macro.builder.ui.RecorderDialog;
+import macro.builder.ui.ThresholdShootoutDialog;
 import macro.builder.ui.sandbox.SandboxDialog;
 import ij.IJ;
 import ij.ImagePlus;
@@ -127,14 +128,17 @@ public class Macro_Builder implements PlugIn {
             JButton record = new JButton("Record in Fiji");
             JButton preview = new JButton("Preview macro");
             JButton run = new JButton("Run macro on selected image");
+            JButton testCounts = new JButton("Test counts...");
             build.addActionListener(e -> openSandbox());
             record.addActionListener(e -> openRecorder());
             preview.addActionListener(e -> previewLastMacro());
             run.addActionListener(e -> runLastMacroOnDuplicate());
+            testCounts.addActionListener(e -> openCountTester());
             left.add(build);
             left.add(record);
             left.add(preview);
             left.add(run);
+            left.add(testCounts);
 
             JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
             JButton save = new JButton("Save macro...");
@@ -438,6 +442,16 @@ public class Macro_Builder implements PlugIn {
                 closeImageQuietly(work);
                 IJ.showMessage("Macro Builder", "Run failed:\n" + cleanMessage(ex));
             }
+        }
+
+        private void openCountTester() {
+            if (lastMacro == null || lastMacro.trim().isEmpty()) {
+                IJ.showMessage("Macro Builder", "No macro has been built or recorded yet.");
+                return;
+            }
+            if (!ensureImage()) return;
+            ThresholdShootoutDialog.show(dialog, sourceImage, lastMacro);
+            setStatus("Opened count tester.");
         }
 
         private void previewLastMacro() {

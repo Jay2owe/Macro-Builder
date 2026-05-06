@@ -6,6 +6,10 @@ import java.util.List;
 
 public final class ShootoutSettings {
 
+    public static final String FIXED_THRESHOLD_HELP =
+            "Fixed thresholds use the macro output's native intensity values. "
+                    + "A value of 2000 on a 16-bit image means intensity 2000, not a 0-255 value.";
+
     public enum CountingMode {
         PARTICLES_2D,
         OBJECTS_3D
@@ -79,6 +83,31 @@ public final class ShootoutSettings {
         methods.add("IsoData");
         methods.add("Minimum");
         return Collections.unmodifiableList(methods);
+    }
+
+    public static List<Double> parseFixedThresholds(String text) {
+        if (text == null || text.trim().isEmpty()) {
+            return Collections.emptyList();
+        }
+        String[] parts = text.split(",", -1);
+        List<Double> values = new ArrayList<Double>();
+        for (String part : parts) {
+            String trimmed = part.trim();
+            if (trimmed.isEmpty()) {
+                throw new IllegalArgumentException("Fixed threshold values must not be blank.");
+            }
+            double value;
+            try {
+                value = Double.parseDouble(trimmed);
+            } catch (NumberFormatException nfe) {
+                throw new IllegalArgumentException("Fixed threshold '" + trimmed + "' is not a number.");
+            }
+            if (Double.isNaN(value) || Double.isInfinite(value)) {
+                throw new IllegalArgumentException("Fixed threshold '" + trimmed + "' must be a finite number.");
+            }
+            values.add(Double.valueOf(value));
+        }
+        return Collections.unmodifiableList(values);
     }
 
     private static List<String> immutableCopy(List<String> values) {

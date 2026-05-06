@@ -56,18 +56,29 @@ public final class ShootoutSettings {
     }
 
     public static ShootoutSettings defaults() {
-        List<String> methods = new ArrayList<String>();
-        methods.add("Default");
-        methods.add("Otsu");
-        methods.add("Triangle");
         return new ShootoutSettings(
                 CountingMode.PARTICLES_2D,
                 ThresholdMode.AUTO_METHODS,
-                methods,
+                defaultAutoMethods(),
                 Collections.<Double>emptyList(),
                 0.0,
                 Double.POSITIVE_INFINITY,
                 true);
+    }
+
+    public static List<String> defaultAutoMethods() {
+        List<String> methods = new ArrayList<String>();
+        methods.add("Default");
+        methods.add("Otsu");
+        methods.add("Li");
+        methods.add("Triangle");
+        methods.add("Huang");
+        methods.add("Moments");
+        methods.add("Yen");
+        methods.add("MaxEntropy");
+        methods.add("IsoData");
+        methods.add("Minimum");
+        return Collections.unmodifiableList(methods);
     }
 
     private static List<String> immutableCopy(List<String> values) {

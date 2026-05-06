@@ -32,14 +32,52 @@ The generated macro appears in the `Last built macro` panel.
 
 - `Preview macro` runs the current macro against a duplicate preview image.
 - `Run macro on selected image` runs the current macro on a duplicate of the selected source image.
+- `Test counts...` opens a count-testing dialog for the current macro and selected source image.
 
 The source image is not modified by these test actions.
+
+## Test Counts
+
+Use `Test counts...` after building or recording a macro. Macro Builder duplicates the selected source image, runs the current macro on the duplicate, thresholds the processed result, converts the thresholded result to a binary mask, and counts the mask. The selected source image remains unchanged.
+
+Counting modes:
+
+- `2D particles` counts connected foreground objects on each slice independently.
+- `3D stack objects` counts connected foreground objects through the stack as volumes.
+
+Threshold modes:
+
+- `Auto threshold shootout` runs the listed automatic threshold methods and adds one result row per method.
+- `Fixed numeric threshold` runs one or more comma-separated fixed thresholds, for example `2000,5000`.
+- `Auto methods + fixed thresholds` runs both automatic methods and fixed values.
+
+Fixed numeric thresholds use the processed macro output's native intensity scale. On a 16-bit processed image, `2000` means intensity `2000`. Macro Builder does not remap that value to `0-255` before thresholding.
+
+The dialog shows `Macro output range` after a run so you can choose fixed thresholds that match the processed image. Each result row includes the threshold variant, count mode, threshold value, object count, mean object size, foreground coverage, output range, and status. Select a successful row and click `Open mask preview` to inspect the counted binary mask.
+
+Click `Export CSV...` to save the current single-image count table.
+
+## Batch Count Testing
+
+In the `Test Counts` dialog, click `Run batch...` to run the same macro and count settings on selected image files or a selected folder. The batch run writes a CSV file with one row per input file and threshold variant. The CSV includes file metadata, count settings, threshold value, count, mean size, coverage, macro output range, status, and any error message.
+
+Batch count testing supports ordinary image files such as TIFF, PNG, JPEG, GIF, BMP, ICS, and IDS. Bio-Formats containers are skipped in batch mode; open those files individually first if you need the Bio-Formats series chooser.
 
 ## Save A Macro
 
 Click `Save macro...` to export an ImageJ macro file (`.ijm`).
 
 When a macro was created with the visual builder, Macro Builder also writes a `.dag.json` sidecar next to the macro. The sidecar stores the visual graph so the macro can be reloaded and edited more accurately later.
+
+Click `Save batch macro...` to save a batch count wrapper for the current macro and latest count settings. Macro Builder writes three files:
+
+- A wrapper `.ijm` macro that asks for an input folder and output folder, then runs `Macro Builder Batch Count`.
+- A `_Filter.ijm` macro containing the filter steps.
+- A `.settings.json` file containing the count mode, threshold mode, fixed thresholds, size filters, and output CSV name.
+
+If you have not opened `Test counts...` in the current session, `Save batch macro...` uses default count settings: `2D particles`, automatic threshold methods, minimum size `0`, maximum size `Infinity`, and bright objects on a dark background.
+
+Some recorded macros contain commands that may not be safe in batch mode, such as commands that open a fixed file path or depend on the active window. Macro Builder warns before saving those macros, but you should still test the saved wrapper on a small folder before using it for real data.
 
 ## Local State
 

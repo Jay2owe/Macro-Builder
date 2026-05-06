@@ -10,6 +10,9 @@ Do not add project-specific importers, channel naming setup, bin analysis setup,
 
 ```text
 src/main/java/macro/builder/Macro_Builder.java       Launcher and session UI
+src/main/java/macro/builder/Macro_Builder_Batch_Count.java
+                                                        Fiji command used by exported batch count macros
+src/main/java/macro/builder/analysis/                Count shootout models, thresholding, object counting, batch CSV, and batch macro export
 src/main/java/macro/builder/ui/                      Swing dialogs and UI helpers
 src/main/java/macro/builder/ui/sandbox/              Visual builder UI
 src/main/java/macro/builder/image/                   Macro loading, parsing, and execution
@@ -68,12 +71,32 @@ The plugin opens ordinary image files with `IJ.openImage`. Known microscope cont
 
 Keep Bio-Formats optional unless a future change truly needs compile-time Bio-Formats APIs. A normal Fiji installation already provides Bio-Formats at runtime.
 
+## Count Testing
+
+Count testing lives in `src/main/java/macro/builder/analysis/`:
+
+- `ShootoutSettings` stores the count mode, threshold mode, automatic methods, fixed thresholds, size filters, and foreground polarity.
+- `ThresholdShootoutRunner` duplicates the source image, runs the current macro through `FilterExecutor`, measures the processed output range, thresholds each variant, and builds binary masks for counting.
+- `ObjectCounter` counts connected foreground components as either `2D particles` or `3D stack objects`.
+- `BatchShootoutRunner` applies the same runner and settings to ordinary image files or folders, then builds batch CSV rows.
+- `BatchMacroExporter` writes the wrapper macro, filter macro, and `.settings.json` sidecar used by `Macro_Builder_Batch_Count`.
+
+Fixed numeric thresholds must use the processed macro output's native intensity scale. On a 16-bit processed image, `2000` means intensity `2000`; do not remap fixed threshold values to `0-255` before applying them. Automatic threshold methods may use a histogram projection internally, but result rows should report values back in the processed image's native scale.
+
+Run count analysis on duplicates only. `ThresholdShootoutRunner`, preview actions, selected-row mask previews, and batch runs must not mutate the selected source image.
+
+Batch count mode intentionally supports ordinary image files first. Bio-Formats containers are listed during selection but skipped by `BatchShootoutRunner` with a CSV error row, because container series selection is interactive and belongs in single-image opening.
+
 ## Regression Tests
 
 Current automated tests cover:
 
 - ImageJ macro parser behavior.
 - Visual graph serialization and round-tripping.
+- Native `2D particles` and `3D stack objects` counting.
+- Single-image threshold shootouts, including native-scale fixed thresholds.
+- Batch count CSV behavior and window cleanup.
+- Batch macro export and `Macro Builder Batch Count` settings round-tripping.
 
 Run them before every release:
 

@@ -2,6 +2,7 @@
 
 ## 0.1.2 - 2026-05-06
 
+- Added count testing with threshold shootouts, `2D particles` and `3D stack objects` modes, CSV export, batch count CSV runs, and saved batch count macros.
 - Added folder/container opening through Bio-Formats so users can choose the specific series/image inside LIF and other microscope containers before using Macro Builder.
 
 ## 0.1.1 - 2026-05-05

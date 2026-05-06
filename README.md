@@ -1,6 +1,6 @@
 # Macro Builder
 
-Macro Builder is a standalone Fiji/ImageJ plugin for building ImageJ macro (`.ijm`) filter steps from one image or image stack. It opens from `Plugins > Macro Builder > Macro Builder` and provides a small desktop UI for selecting an open Fiji image or opening a single image, folder, stack, or microscope container from disk.
+Macro Builder is a standalone Fiji/ImageJ plugin for building ImageJ macro (`.ijm`) filter steps from one image or image stack. It opens from `Plugins > Macro Builder > Macro Builder` and provides a small desktop UI for selecting an open Fiji image or opening a single image, folder, stack, or microscope container from disk. After building a filter macro, users can test object counts with threshold shootouts, export count results to CSV, and save a batch count macro for ordinary image folders.
 
 The plugin is intentionally standalone. It does not include a bin-analysis importer, channel setup workflow, batch import workflow, or any project-specific analysis setup.
 
@@ -27,7 +27,8 @@ After restart, launch the plugin from `Plugins > Macro Builder > Macro Builder`.
 1. Open an image or stack in Fiji, or click `Open image/container...` inside Macro Builder.
 2. Use `Build step-by-step` to build a visual filter pipeline, or `Record in Fiji` to record ImageJ macro actions.
 3. Use `Preview macro` or `Run macro on selected image` to test the generated macro on a duplicate image.
-4. Use `Save macro...` to export the generated `.ijm` file.
+4. Use `Test counts...` to compare threshold methods and count `2D particles` or `3D stack objects` from the processed macro output.
+5. Use `Save macro...` to export the generated `.ijm` file, or `Save batch macro...` to export a wrapper macro and settings for batch count runs.
 
 For microscope container formats such as `.czi`, `.lif`, `.nd2`, `.oib`, `.oif`, `.lsm`, or `.zvi`, Fiji's Bio-Formats plugin must be available. Standard Fiji installations normally include it. Container files and folder-style datasets open through the Bio-Formats chooser, so you can select the specific series/image to use before running Macro Builder.
 

@@ -1,5 +1,8 @@
 package macro.builder;
 
+import macro.builder.analysis.BatchMacroExporter;
+import macro.builder.analysis.MacroBatchCompatibility;
+import macro.builder.analysis.ShootoutSettings;
 import macro.builder.image.FilterExecutor;
 import macro.builder.image.dag.DagIR;
 import macro.builder.image.dag.DagIRSerializer;
@@ -66,6 +69,7 @@ public class Macro_Builder implements PlugIn {
         private ImagePlus recorderSample;
         private String lastMacro;
         private String lastMacroSource = "none";
+        private ShootoutSettings lastShootoutSettings = ShootoutSettings.defaults();
         private DagIR lastDag;
         private static final String[] BIO_FORMATS_CONTAINER_EXTENSIONS = {
                 "lif", "czi", "nd2", "oib", "oif", "lsm", "zvi", "ome",
@@ -142,10 +146,13 @@ public class Macro_Builder implements PlugIn {
 
             JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
             JButton save = new JButton("Save macro...");
+            JButton saveBatch = new JButton("Save batch macro...");
             JButton close = new JButton("Close");
             save.addActionListener(e -> saveCurrentMacro());
+            saveBatch.addActionListener(e -> saveBatchMacro());
             close.addActionListener(e -> dialog.dispose());
             right.add(save);
+            right.add(saveBatch);
             right.add(close);
 
             footer.add(left, BorderLayout.WEST);
@@ -450,7 +457,12 @@ public class Macro_Builder implements PlugIn {
                 return;
             }
             if (!ensureImage()) return;
-            ThresholdShootoutDialog.show(dialog, sourceImage, lastMacro);
+            ThresholdShootoutDialog.show(dialog, sourceImage, lastMacro,
+                    new ThresholdShootoutDialog.SettingsListener() {
+                        @Override public void settingsChanged(ShootoutSettings settings) {
+                            lastShootoutSettings = settings;
+                        }
+                    });
             setStatus("Opened count tester.");
         }
 
@@ -488,6 +500,51 @@ public class Macro_Builder implements PlugIn {
             } catch (Exception ex) {
                 IJ.showMessage("Macro Builder", "Could not save macro:\n" + cleanMessage(ex));
             }
+        }
+
+        private void saveBatchMacro() {
+            if (lastMacro == null || lastMacro.trim().isEmpty()) {
+                IJ.showMessage("Macro Builder", "No macro has been built or recorded yet.");
+                return;
+            }
+            List<String> warnings = MacroBatchCompatibility.warnings(lastMacro);
+            if (!warnings.isEmpty() && !confirmBatchWarnings(warnings)) {
+                return;
+            }
+
+            JFileChooser chooser = new JFileChooser();
+            chooser.setDialogTitle("Save Batch Macro");
+            chooser.setSelectedFile(new File(BatchMacroExporter.DEFAULT_WRAPPER_NAME));
+            chooser.addChoosableFileFilter(new FileNameExtensionFilter("ImageJ macro (*.ijm)", "ijm"));
+            if (chooser.showSaveDialog(dialog) != JFileChooser.APPROVE_OPTION) return;
+
+            File file = ensureExtension(chooser.getSelectedFile(), ".ijm");
+            try {
+                BatchMacroExporter.ExportResult result = new BatchMacroExporter().export(
+                        file,
+                        lastMacro,
+                        lastShootoutSettings == null ? ShootoutSettings.defaults() : lastShootoutSettings);
+                setStatus("Saved " + result.wrapperMacro.getName()
+                        + " with " + result.settingsJson.getName() + ".");
+            } catch (Exception ex) {
+                IJ.showMessage("Macro Builder", "Could not save batch macro:\n" + cleanMessage(ex));
+            }
+        }
+
+        private boolean confirmBatchWarnings(List<String> warnings) {
+            StringBuilder message = new StringBuilder();
+            message.append("This macro may not be safe for batch use:\n\n");
+            for (String warning : warnings) {
+                message.append("- ").append(warning).append('\n');
+            }
+            message.append("\nSave the batch macro anyway?");
+            int choice = JOptionPane.showConfirmDialog(
+                    dialog,
+                    message.toString(),
+                    "Batch Compatibility Warning",
+                    JOptionPane.OK_CANCEL_OPTION,
+                    JOptionPane.WARNING_MESSAGE);
+            return choice == JOptionPane.OK_OPTION;
         }
 
         private void loadState() {

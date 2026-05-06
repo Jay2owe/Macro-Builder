@@ -66,6 +66,7 @@ public final class ThresholdShootoutDialog {
     private final ImagePlus source;
     private final String macro;
     private final JDialog dialog;
+    private final SettingsListener settingsListener;
 
     private final JComboBox<String> countingMode = new JComboBox<String>(new String[]{COUNT_2D, COUNT_3D});
     private final JComboBox<String> thresholdMode = new JComboBox<String>(
@@ -92,9 +93,14 @@ public final class ThresholdShootoutDialog {
     private volatile boolean batchCancelRequested;
     private boolean closed;
 
-    private ThresholdShootoutDialog(Window owner, ImagePlus source, String macro) {
+    private ThresholdShootoutDialog(
+            Window owner,
+            ImagePlus source,
+            String macro,
+            SettingsListener settingsListener) {
         this.source = source;
         this.macro = macro == null ? "" : macro;
+        this.settingsListener = settingsListener;
         this.dialog = new JDialog(owner, "Test Counts", Dialog.ModalityType.MODELESS);
         this.dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         this.dialog.setLayout(new BorderLayout(8, 8));
@@ -106,7 +112,15 @@ public final class ThresholdShootoutDialog {
             IJ.log("Test Counts needs the Fiji desktop UI.");
             return;
         }
-        new ThresholdShootoutDialog(owner, source, macro).open();
+        new ThresholdShootoutDialog(owner, source, macro, null).open();
+    }
+
+    public static void show(Window owner, ImagePlus source, String macro, SettingsListener settingsListener) {
+        if (GraphicsEnvironment.isHeadless()) {
+            IJ.log("Test Counts needs the Fiji desktop UI.");
+            return;
+        }
+        new ThresholdShootoutDialog(owner, source, macro, settingsListener).open();
     }
 
     private void open() {
@@ -309,6 +323,7 @@ public final class ThresholdShootoutDialog {
             IJ.showMessage("Test Counts", cleanMessage(ex));
             return;
         }
+        notifySettings(settings);
 
         closeImageQuietly(activeMaskPreview);
         activeMaskPreview = null;
@@ -503,6 +518,7 @@ public final class ThresholdShootoutDialog {
             IJ.showMessage("Test Counts", cleanMessage(ex));
             return;
         }
+        notifySettings(settings);
 
         List<File> selectedInputs = chooseBatchInputs();
         if (selectedInputs.isEmpty()) return;
@@ -714,6 +730,12 @@ public final class ThresholdShootoutDialog {
                 || mode == ShootoutSettings.ThresholdMode.AUTO_AND_FIXED;
     }
 
+    private void notifySettings(ShootoutSettings settings) {
+        if (settingsListener != null && settings != null) {
+            settingsListener.settingsChanged(settings);
+        }
+    }
+
     private static void closeResultImages(List<ShootoutResult> rows) {
         if (rows == null) return;
         for (ShootoutResult row : rows) {
@@ -814,6 +836,10 @@ public final class ThresholdShootoutDialog {
     private static String cleanMessage(String message) {
         if (message == null || message.trim().isEmpty()) return "Unknown error";
         return message.trim().replace('\n', ' ').replace('\r', ' ');
+    }
+
+    public interface SettingsListener {
+        void settingsChanged(ShootoutSettings settings);
     }
 
     private static final class BatchRunResult {

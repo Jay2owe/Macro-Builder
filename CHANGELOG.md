@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.0 - 2026-05-07
+
+- Reworked the main launcher UI with compact workflow tiles, loaded-macro controls, saved macro loading, and a shorter scrollable macro view.
+- Added automatic image/container prompting for workflows that require a selected image or stack.
+- Polished launcher icons and image/container reopening behavior.
+
 ## 0.1.2 - 2026-05-06
 
 - Added count testing with threshold shootouts, `2D particles` and `3D stack objects` modes, CSV export, batch count CSV runs, and saved batch count macros.

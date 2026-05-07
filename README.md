@@ -51,7 +51,7 @@ On macOS or Linux:
 The uploadable plugin jar is written to:
 
 ```text
-target/Macro_Builder-0.1.2.jar
+target/Macro_Builder-0.2.0.jar
 ```
 
 ## Local Fiji Smoke Test

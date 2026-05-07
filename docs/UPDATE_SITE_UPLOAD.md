@@ -27,14 +27,14 @@ rg -n "<private-path-or-old-project-name>" . --glob "!target/**" --glob "!.git/*
 Expected upload artifact:
 
 ```text
-target/Macro_Builder-0.1.2.jar
+target/Macro_Builder-0.2.0.jar
 ```
 
 Do not upload:
 
 ```text
-target/Macro_Builder-0.1.2-sources.jar
-target/Macro_Builder-0.1.2-tests.jar
+target/Macro_Builder-0.2.0-sources.jar
+target/Macro_Builder-0.2.0-tests.jar
 ```
 
 ## 2. Local Fiji Test
@@ -92,10 +92,10 @@ See [GitHub Actions release automation](GITHUB_ACTIONS_RELEASE.md).
 
 Manual Fiji upload is still available:
 
-1. Make sure `Macro_Builder-0.1.2.jar` is in the local Fiji `plugins/` folder.
+1. Make sure `Macro_Builder-0.2.0.jar` is in the local Fiji `plugins/` folder.
 2. Open the updater's `Advanced Mode`.
 3. For a first upload, choose `View local-only files`.
-4. Select `plugins/Macro_Builder-0.1.2.jar`.
+4. Select `plugins/Macro_Builder-0.2.0.jar`.
 5. Choose `Upload to Macro-Builder`.
 6. Click `Apply Changes (upload)`.
 
@@ -123,7 +123,7 @@ If it exists, clear it with the ImageJ WebDAV upload password:
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\clear-update-site-lock.ps1
 ```
 
-Then restart Fiji, reopen the updater, and upload `plugins/Macro_Builder-0.1.2.jar` again.
+Then restart Fiji, reopen the updater, and upload `plugins/Macro_Builder-0.2.0.jar` again.
 
 ## 6. Clean Install Verification
 
@@ -139,6 +139,6 @@ Use a separate clean Fiji install:
 After the uploaded build is verified:
 
 ```powershell
-git tag v0.1.2
-git push origin v0.1.2
+git tag v0.2.0
+git push origin v0.2.0
 ```

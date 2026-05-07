@@ -42,7 +42,7 @@ On macOS or Linux:
 The main plugin jar is:
 
 ```text
-target/Macro_Builder-0.1.2.jar
+target/Macro_Builder-0.2.0.jar
 ```
 
 Do not upload the generated `*-sources.jar` or `*-tests.jar` files to the ImageJ update site.

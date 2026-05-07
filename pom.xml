@@ -14,7 +14,7 @@
 
     <groupId>io.github.jay2owe</groupId>
     <artifactId>macro-builder</artifactId>
-    <version>0.1.2</version>
+    <version>0.2.0</version>
 
     <name>Macro Builder</name>
     <description>Standalone ImageJ/Fiji plugin for building filter macros from a single image or stack.</description>

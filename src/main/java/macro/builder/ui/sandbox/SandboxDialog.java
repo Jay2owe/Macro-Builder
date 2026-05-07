@@ -59,14 +59,13 @@ public final class SandboxDialog extends JDialog {
     private final SandboxModel model;
     private final PreviewHandler previewHandler;
     private final CountDownLatch done = new CountDownLatch(1);
-    private final CombinerEditorPanel combinerEditor;
     private final DagCanvasPanel canvas;
     private final FilterCatalog catalog;
     private final ImagePreviewPanel sourcePreview = new ImagePreviewPanel("Source image");
     private final ImagePreviewPanel outputPreview = new ImagePreviewPanel("Preview output");
     private final JLabel status = new JLabel(" ");
     private final JLabel legacyBanner = new JLabel("This chain runs through legacy execution (slower, single-threaded per image).");
-    private final JButton previewSelected = new JButton("Preview up to selected step");
+    private final JButton previewSelected = new JButton("Preview to selected point");
     private final JButton previewFinal = new JButton("Preview full filter");
     private final JButton startFromPreset = new JButton("Start from a preset...");
     private final JButton help = new JButton("?");
@@ -86,9 +85,6 @@ public final class SandboxDialog extends JDialog {
         this.initialIjm = DagToIjmEmitter.emit(model.toDag());
         this.initialNodeCount = countNodes(model);
         this.previewHandler = previewHandler;
-        this.combinerEditor = new CombinerEditorPanel(model, new Runnable() {
-            @Override public void run() { canvas.rebuild(); }
-        });
         this.catalog = new FilterCatalog();
         this.canvas = new DagCanvasPanel(model, new DagCanvasPanel.CatalogSupplier() {
             @Override public FilterCatalog.Entry getSelectedCatalogEntry() {
@@ -105,6 +101,14 @@ public final class SandboxDialog extends JDialog {
 
             @Override public void previewToNode(SandboxModel.Line line, SandboxModel.Node node) {
                 previewToNodeInline(node);
+            }
+        }, new DagCanvasPanel.CombinerActionHandler() {
+            @Override public void editCombiner(SandboxModel.CombinerNode combiner) {
+                editCombinerInline(combiner);
+            }
+
+            @Override public void previewToCombiner(SandboxModel.CombinerNode combiner) {
+                previewToCombinerInline(combiner);
             }
         }, new Runnable() {
             @Override public void run() { refreshEditors(); }
@@ -185,19 +189,6 @@ public final class SandboxDialog extends JDialog {
         catalogPanel.setMinimumSize(new Dimension(260, 1));
         catalogPanel.add(catalog, BorderLayout.CENTER);
 
-        JPanel editors = new JPanel(new GridBagLayout());
-        GridBagConstraints gbc = new GridBagConstraints();
-        gbc.gridx = 0;
-        gbc.gridy = 0;
-        gbc.weightx = 1.0;
-        gbc.fill = GridBagConstraints.HORIZONTAL;
-        editors.add(combinerEditor, gbc);
-        gbc.gridy = 1;
-        gbc.weighty = 1.0;
-        gbc.fill = GridBagConstraints.BOTH;
-        editors.add(new JPanel(), gbc);
-        catalogPanel.add(editors, BorderLayout.SOUTH);
-
         JScrollPane canvasScroll = new JScrollPane(canvas);
         canvasScroll.setBorder(BorderFactory.createEmptyBorder());
         canvasScroll.setMinimumSize(new Dimension(360, 1));
@@ -270,14 +261,15 @@ public final class SandboxDialog extends JDialog {
                 + "Build the channel's custom filter as a chain of steps. Pick a step "
                 + "from <b>Available steps</b> on the right, then click <b>+ Add step</b> "
                 + "on the branch you want it on. Double-click or right-click a step in "
-                + "<b>Your filter</b> to edit its settings."
+                + "<b>Your filter</b> to edit its settings. Double-click or right-click "
+                + "a merge card to edit how branches combine."
                 + "<br><br>"
                 + "<b>Start from a preset...</b><br>"
                 + "Replaces the current chain with one of the bundled filter presets "
                 + "as a starting point."
                 + "<br><br>"
-                + "<b>Preview up to selected step</b><br>"
-                + "Runs the chain only up to the step you have selected, so you can "
+                + "<b>Preview to selected point</b><br>"
+                + "Runs the chain only up to the step or merge you have selected, so you can "
                 + "see intermediate results."
                 + "<br><br>"
                 + "<b>Preview full filter</b><br>"
@@ -424,8 +416,10 @@ public final class SandboxDialog extends JDialog {
     }
 
     private void refreshPreviewButtons() {
-        previewSelected.setEnabled(!busy && model.selected instanceof SandboxModel.Node);
-        previewFinal.setEnabled(!busy && hasAnyNode(model));
+        boolean selectedPreviewable = model.selected instanceof SandboxModel.Node
+                || model.selected instanceof SandboxModel.CombinerNode;
+        previewSelected.setEnabled(!busy && selectedPreviewable);
+        previewFinal.setEnabled(!busy && (hasAnyNode(model) || !model.combiners.isEmpty()));
     }
 
     private static boolean hasAnyNode(SandboxModel model) {
@@ -436,10 +430,6 @@ public final class SandboxDialog extends JDialog {
     }
 
     private void refreshEditors() {
-        Object selected = model.selected;
-        combinerEditor.setCombiner(selected instanceof SandboxModel.CombinerNode
-                ? (SandboxModel.CombinerNode) selected
-                : null);
         legacyBanner.setVisible(model.hasLegacyNode());
         refreshPreviewButtons();
     }
@@ -458,6 +448,25 @@ public final class SandboxDialog extends JDialog {
     private void previewToNodeInline(SandboxModel.Node node) {
         if (node == null) return;
         model.selected = node;
+        canvas.rebuild();
+        refreshEditors();
+        preview(model.toPartialDag());
+    }
+
+    private void editCombinerInline(SandboxModel.CombinerNode combiner) {
+        if (combiner == null) return;
+        model.selected = combiner;
+        if (MergeEditorDialog.show(this, model, combiner)) {
+            canvas.rebuild();
+            refreshEditors();
+        } else {
+            refreshEditors();
+        }
+    }
+
+    private void previewToCombinerInline(SandboxModel.CombinerNode combiner) {
+        if (combiner == null) return;
+        model.selected = combiner;
         canvas.rebuild();
         refreshEditors();
         preview(model.toPartialDag());

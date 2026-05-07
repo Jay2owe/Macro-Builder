@@ -33,10 +33,16 @@ public final class DagCanvasPanel extends JPanel {
         void previewToNode(SandboxModel.Line line, SandboxModel.Node node);
     }
 
+    public interface CombinerActionHandler {
+        void editCombiner(SandboxModel.CombinerNode combiner);
+        void previewToCombiner(SandboxModel.CombinerNode combiner);
+    }
+
     private final SandboxModel model;
     private final CatalogSupplier catalogSupplier;
     private final NodeCreator nodeCreator;
     private final NodeActionHandler nodeActionHandler;
+    private final CombinerActionHandler combinerActionHandler;
     private final Runnable selectionCallback;
     private final Runnable changeCallback;
 
@@ -46,18 +52,27 @@ public final class DagCanvasPanel extends JPanel {
     public DagCanvasPanel(SandboxModel model, CatalogSupplier catalogSupplier,
                           NodeCreator nodeCreator,
                           Runnable selectionCallback, Runnable changeCallback) {
-        this(model, catalogSupplier, nodeCreator, null, selectionCallback, changeCallback);
+        this(model, catalogSupplier, nodeCreator, null, null, selectionCallback, changeCallback);
     }
 
     public DagCanvasPanel(SandboxModel model, CatalogSupplier catalogSupplier,
                           NodeCreator nodeCreator,
                           NodeActionHandler nodeActionHandler,
                           Runnable selectionCallback, Runnable changeCallback) {
+        this(model, catalogSupplier, nodeCreator, nodeActionHandler, null, selectionCallback, changeCallback);
+    }
+
+    public DagCanvasPanel(SandboxModel model, CatalogSupplier catalogSupplier,
+                          NodeCreator nodeCreator,
+                          NodeActionHandler nodeActionHandler,
+                          CombinerActionHandler combinerActionHandler,
+                          Runnable selectionCallback, Runnable changeCallback) {
         super(new GridBagLayout());
         this.model = model;
         this.catalogSupplier = catalogSupplier;
         this.nodeCreator = nodeCreator;
         this.nodeActionHandler = nodeActionHandler;
+        this.combinerActionHandler = combinerActionHandler;
         this.selectionCallback = selectionCallback;
         this.changeCallback = changeCallback;
         setBorder(BorderFactory.createTitledBorder("Your filter"));
@@ -326,7 +341,8 @@ public final class DagCanvasPanel extends JPanel {
         GridBagConstraints gbc = baseGbc();
         gbc.weightx = 1.0;
         gbc.fill = GridBagConstraints.HORIZONTAL;
-        card.add(new JLabel("combiner: " + combiner.inputs + " " + combiner.op), gbc);
+        JLabel label = new JLabel("combiner: " + combiner.inputs + " " + combiner.op);
+        card.add(label, gbc);
         JButton delete = new JButton("x");
         delete.addActionListener(e -> {
             model.removeCombiner(combiner);
@@ -336,13 +352,56 @@ public final class DagCanvasPanel extends JPanel {
         gbc.weightx = 0.0;
         gbc.fill = GridBagConstraints.NONE;
         card.add(delete, gbc);
-        card.addMouseListener(new MouseAdapter() {
-            @Override public void mouseClicked(MouseEvent e) {
+
+        MouseAdapter adapter = new MouseAdapter() {
+            @Override public void mousePressed(MouseEvent e) {
+                if (showCombinerMenuIfRequested(e, combiner)) return;
+                if (!SwingUtilities.isLeftMouseButton(e)) return;
                 model.selected = combiner;
                 selected();
+                if (e.getClickCount() == 2 && combinerActionHandler != null) {
+                    combinerActionHandler.editCombiner(combiner);
+                }
             }
-        });
+
+            @Override public void mouseReleased(MouseEvent e) {
+                showCombinerMenuIfRequested(e, combiner);
+            }
+        };
+        card.addMouseListener(adapter);
+        label.addMouseListener(adapter);
         return card;
+    }
+
+    private boolean showCombinerMenuIfRequested(MouseEvent e, SandboxModel.CombinerNode combiner) {
+        if (!e.isPopupTrigger()) return false;
+        Point p = SwingUtilities.convertPoint((Component) e.getSource(), e.getPoint(), this);
+        model.selected = combiner;
+        selected();
+        buildCombinerMenu(combiner).show(this, p.x, p.y);
+        return true;
+    }
+
+    private JPopupMenu buildCombinerMenu(final SandboxModel.CombinerNode combiner) {
+        JPopupMenu menu = new JPopupMenu();
+        menu.add(menuItem("Edit merge", new Runnable() {
+            @Override public void run() {
+                if (combinerActionHandler != null) combinerActionHandler.editCombiner(combiner);
+            }
+        }));
+        menu.add(menuItem("Preview to merge", new Runnable() {
+            @Override public void run() {
+                if (combinerActionHandler != null) combinerActionHandler.previewToCombiner(combiner);
+            }
+        }));
+        menu.addSeparator();
+        menu.add(menuItem("Delete", new Runnable() {
+            @Override public void run() {
+                model.removeCombiner(combiner);
+                changedAndSelected();
+            }
+        }));
+        return menu;
     }
 
     private GridBagConstraints baseGbc() {

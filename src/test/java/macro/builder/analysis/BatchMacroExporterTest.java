@@ -33,7 +33,7 @@ public class BatchMacroExporterTest {
                 Double.POSITIVE_INFINITY,
                 false);
 
-        BatchMacroExporter.ExportResult result = new BatchMacroExporter().export(wrapper, macro, settings);
+        BatchMacroExporter.ExportResult result = new BatchMacroExporter().export(wrapper, macro, settings, 2);
 
         assertTrue(result.wrapperMacro.isFile());
         assertTrue(result.filterMacro.isFile());
@@ -48,6 +48,7 @@ public class BatchMacroExporterTest {
 
         String json = read(result.settingsJson);
         assertTrue(json.contains("\"macroPath\": \"Validated_Counts_Filter.ijm\""));
+        assertTrue(json.contains("\"primaryChannel\": 2"));
         assertTrue(json.contains("\"countingMode\": \"OBJECTS_3D\""));
         assertTrue(json.contains("\"thresholdMode\": \"AUTO_AND_FIXED\""));
         assertTrue(json.contains("\"fixedThresholds\": [2000]"));
@@ -55,6 +56,7 @@ public class BatchMacroExporterTest {
 
         BatchMacroExporter.ExportedSettings roundTripped = BatchMacroExporter.readSettings(result.settingsJson);
         assertEquals(result.filterMacro.getCanonicalFile(), roundTripped.macroFile().getCanonicalFile());
+        assertEquals(2, roundTripped.primaryChannel);
         assertEquals(CountingMode.OBJECTS_3D, roundTripped.settings.countingMode);
         assertEquals(ThresholdMode.AUTO_AND_FIXED, roundTripped.settings.thresholdMode);
         assertEquals(Arrays.asList("Otsu", "Li"), roundTripped.settings.autoMethods);
@@ -62,6 +64,28 @@ public class BatchMacroExporterTest {
         assertEquals(100.0, roundTripped.settings.minSize, 0.0001);
         assertEquals(Double.POSITIVE_INFINITY, roundTripped.settings.maxSize, 0.0001);
         assertEquals(false, roundTripped.settings.darkBackground);
+    }
+
+    @Test
+    public void oldSettingsWithoutPrimaryChannelDefaultToOne() throws Exception {
+        File settingsFile = new File(temporaryFolder.getRoot(), "old.settings.json");
+        Files.write(settingsFile.toPath(), (
+                "{\n"
+                        + "  \"schemaVersion\": 1,\n"
+                        + "  \"macroPath\": \"Filter.ijm\",\n"
+                        + "  \"resultsFile\": \"counts.csv\",\n"
+                        + "  \"countingMode\": \"PARTICLES_2D\",\n"
+                        + "  \"thresholdMode\": \"FIXED_VALUES\",\n"
+                        + "  \"autoMethods\": [],\n"
+                        + "  \"fixedThresholds\": [100],\n"
+                        + "  \"minSize\": 0,\n"
+                        + "  \"maxSize\": \"Infinity\",\n"
+                        + "  \"darkBackground\": true\n"
+                        + "}\n").getBytes(StandardCharsets.UTF_8));
+
+        BatchMacroExporter.ExportedSettings settings = BatchMacroExporter.readSettings(settingsFile);
+
+        assertEquals(1, settings.primaryChannel);
     }
 
     private static String read(File file) throws Exception {

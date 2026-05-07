@@ -23,6 +23,14 @@ public final class BatchMacroExporter {
     private static final String SETTINGS_SUFFIX = ".settings.json";
 
     public ExportResult export(File wrapperFile, String macro, ShootoutSettings settings) throws IOException {
+        return export(wrapperFile, macro, settings, 1);
+    }
+
+    public ExportResult export(
+            File wrapperFile,
+            String macro,
+            ShootoutSettings settings,
+            int primaryChannel) throws IOException {
         if (wrapperFile == null) {
             throw new IllegalArgumentException("wrapperFile must not be null");
         }
@@ -46,7 +54,8 @@ public final class BatchMacroExporter {
                 settingsFile,
                 filterMacro.getName(),
                 DEFAULT_RESULTS_FILE,
-                settings);
+                settings,
+                primaryChannel);
 
         Files.write(filterMacro.toPath(), macro.getBytes(StandardCharsets.UTF_8));
         Files.write(settingsFile.toPath(), toJson(exportedSettings).getBytes(StandardCharsets.UTF_8));
@@ -64,6 +73,7 @@ public final class BatchMacroExporter {
         String resultsFile = stringField(json, "resultsFile", DEFAULT_RESULTS_FILE);
         String countingMode = stringField(json, "countingMode", CountingMode.PARTICLES_2D.name());
         String thresholdMode = stringField(json, "thresholdMode", ThresholdMode.AUTO_METHODS.name());
+        int primaryChannel = intField(json, "primaryChannel", 1);
         List<String> autoMethods = stringArrayField(json, "autoMethods", ShootoutSettings.defaultAutoMethods());
         List<Double> fixedThresholds = doubleArrayField(json, "fixedThresholds", Collections.<Double>emptyList());
         double minSize = doubleField(json, "minSize", 0.0, false);
@@ -78,7 +88,7 @@ public final class BatchMacroExporter {
                 minSize,
                 maxSize,
                 darkBackground);
-        return new ExportedSettings(settingsFile.getAbsoluteFile(), macroPath, resultsFile, settings);
+        return new ExportedSettings(settingsFile.getAbsoluteFile(), macroPath, resultsFile, settings, primaryChannel);
     }
 
     public static String toJson(ExportedSettings exportedSettings) {
@@ -91,6 +101,7 @@ public final class BatchMacroExporter {
         json.append("  \"schemaVersion\": 1,\n");
         json.append("  \"macroPath\": ").append(jsonString(exportedSettings.macroPath)).append(",\n");
         json.append("  \"resultsFile\": ").append(jsonString(exportedSettings.resultsFile)).append(",\n");
+        json.append("  \"primaryChannel\": ").append(Math.max(1, exportedSettings.primaryChannel)).append(",\n");
         json.append("  \"countingMode\": ").append(jsonString(settings.countingMode.name())).append(",\n");
         json.append("  \"thresholdMode\": ").append(jsonString(settings.thresholdMode.name())).append(",\n");
         json.append("  \"autoMethods\": ").append(jsonStringArray(settings.autoMethods)).append(",\n");
@@ -152,6 +163,20 @@ public final class BatchMacroExporter {
             return defaultValue;
         }
         return Boolean.parseBoolean(matcher.group(1));
+    }
+
+    private static int intField(String json, String field, int defaultValue) {
+        Pattern pattern = Pattern.compile("\"" + Pattern.quote(field) + "\"\\s*:\\s*(-?\\d+)",
+                Pattern.DOTALL);
+        Matcher matcher = pattern.matcher(json);
+        if (!matcher.find()) {
+            return defaultValue;
+        }
+        try {
+            return Math.max(1, Integer.parseInt(matcher.group(1)));
+        } catch (NumberFormatException nfe) {
+            return defaultValue;
+        }
     }
 
     private static double doubleField(String json, String field, double defaultValue, boolean allowInfinity) {
@@ -330,12 +355,22 @@ public final class BatchMacroExporter {
         public final String macroPath;
         public final String resultsFile;
         public final ShootoutSettings settings;
+        public final int primaryChannel;
 
         public ExportedSettings(
                 File settingsFile,
                 String macroPath,
                 String resultsFile,
                 ShootoutSettings settings) {
+            this(settingsFile, macroPath, resultsFile, settings, 1);
+        }
+
+        public ExportedSettings(
+                File settingsFile,
+                String macroPath,
+                String resultsFile,
+                ShootoutSettings settings,
+                int primaryChannel) {
             if (settings == null) {
                 throw new IllegalArgumentException("settings must not be null");
             }
@@ -347,6 +382,7 @@ public final class BatchMacroExporter {
                     ? DEFAULT_RESULTS_FILE
                     : resultsFile;
             this.settings = settings;
+            this.primaryChannel = Math.max(1, primaryChannel);
         }
 
         public File macroFile() {

@@ -37,6 +37,15 @@ public final class BatchShootoutRunner {
             String macro,
             ShootoutSettings settings,
             Progress progress) {
+        return run(files, macro, settings, 1, progress);
+    }
+
+    public List<BatchShootoutResult> run(
+            List<File> files,
+            String macro,
+            ShootoutSettings settings,
+            int primaryChannel,
+            Progress progress) {
         if (settings == null) {
             throw new IllegalArgumentException("settings must not be null");
         }
@@ -53,7 +62,7 @@ public final class BatchShootoutRunner {
             }
             File file = batchFiles.get(i);
             callback.onFileStarted(file, i + 1, total);
-            List<BatchShootoutResult> fileRows = runOneFile(file, macro, settings);
+            List<BatchShootoutResult> fileRows = runOneFile(file, macro, settings, primaryChannel);
             rows.addAll(fileRows);
             callback.onFileFinished(file, i + 1, total, fileRows.size());
         }
@@ -153,7 +162,8 @@ public final class BatchShootoutRunner {
     private static List<BatchShootoutResult> runOneFile(
             File file,
             String macro,
-            ShootoutSettings settings) {
+            ShootoutSettings settings,
+            int primaryChannel) {
         if (file == null) {
             return singletonFailure(null, settings, "No file was selected.");
         }
@@ -176,7 +186,12 @@ public final class BatchShootoutRunner {
                 return singletonFailure(file, settings, "Fiji could not open this image file.");
             }
 
-            shootoutRows = new ThresholdShootoutRunner().run(image, macro == null ? "" : macro, settings);
+            shootoutRows = new ThresholdShootoutRunner().run(
+                    image,
+                    macro == null ? "" : macro,
+                    settings,
+                    primaryChannel,
+                    null);
             if (shootoutRows.isEmpty()) {
                 return singletonFailure(file, settings, "No threshold variants were run.");
             }

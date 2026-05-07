@@ -1,10 +1,16 @@
 package macro.builder.analysis;
 
 import ij.ImagePlus;
+import ij.ImageStack;
 import ij.process.ByteProcessor;
 import ij.process.ShortProcessor;
 import macro.builder.analysis.ShootoutSettings.CountingMode;
 import macro.builder.analysis.ShootoutSettings.ThresholdMode;
+import macro.builder.image.dag.Combiner;
+import macro.builder.image.dag.CombinerOp;
+import macro.builder.image.dag.DagIR;
+import macro.builder.image.dag.DagLine;
+import macro.builder.image.dag.DagToIjmEmitter;
 import org.junit.Test;
 
 import java.util.Arrays;
@@ -107,11 +113,108 @@ public class ThresholdShootoutRunnerTest {
         assertTrue(rows.get(2).isSuccess());
     }
 
+    @Test
+    public void nonDagMacroRunsOnSelectedPrimaryChannelOnly() {
+        ImagePlus source = twoChannelImage("source",
+                new int[][]{
+                        {5, 5, 5},
+                        {5, 5, 5},
+                        {5, 5, 5}
+                },
+                new int[][]{
+                        {5, 5, 5},
+                        {5, 200, 5},
+                        {5, 5, 5}
+                });
+
+        List<ShootoutResult> rows = new ThresholdShootoutRunner().run(
+                source,
+                "",
+                fixedSettings(100.0),
+                2,
+                null);
+
+        assertEquals(1, rows.size());
+        assertTrue(rows.get(0).isSuccess());
+        assertEquals(1, rows.get(0).countSummary.count);
+    }
+
+    @Test
+    public void embeddedDagMacroStillReceivesAuxiliaryChannels() {
+        ImagePlus source = twoChannelImage("source",
+                new int[][]{
+                        {0, 0, 0},
+                        {0, 200, 0},
+                        {0, 0, 0}
+                },
+                new int[][]{
+                        {0, 0, 0},
+                        {0, 200, 0},
+                        {0, 0, 0}
+                });
+        DagIR dag = new DagIR(
+                1,
+                1,
+                Arrays.asList(
+                        new DagLine("line_A", Collections.emptyList(), 1),
+                        new DagLine("line_B", Collections.emptyList(), 2)),
+                Collections.singletonList(new Combiner(
+                        "merge_AB",
+                        CombinerOp.SUBTRACT,
+                        Arrays.asList("line_A", "line_B"))),
+                "merge_AB",
+                "native");
+
+        List<ShootoutResult> rows = new ThresholdShootoutRunner().run(
+                source,
+                DagToIjmEmitter.emit(dag),
+                fixedSettings(100.0),
+                1,
+                null);
+
+        assertEquals(1, rows.size());
+        assertTrue(rows.get(0).isSuccess());
+        assertEquals(0, rows.get(0).countSummary.count);
+    }
+
     private static void fill(ShortProcessor processor, int value) {
         for (int y = 0; y < processor.getHeight(); y++) {
             for (int x = 0; x < processor.getWidth(); x++) {
                 processor.set(x, y, value);
             }
         }
+    }
+
+    private static ShootoutSettings fixedSettings(double threshold) {
+        return new ShootoutSettings(
+                CountingMode.PARTICLES_2D,
+                ThresholdMode.FIXED_VALUES,
+                Collections.<String>emptyList(),
+                Collections.singletonList(Double.valueOf(threshold)),
+                0.0,
+                Double.POSITIVE_INFINITY,
+                true);
+    }
+
+    private static ImagePlus twoChannelImage(String title, int[][] channel1, int[][] channel2) {
+        ImageStack stack = new ImageStack(channel1[0].length, channel1.length);
+        stack.addSlice("C1", byteProcessor(channel1));
+        stack.addSlice("C2", byteProcessor(channel2));
+        ImagePlus image = new ImagePlus(title, stack);
+        image.setDimensions(2, 1, 1);
+        image.setOpenAsHyperStack(true);
+        return image;
+    }
+
+    private static ByteProcessor byteProcessor(int[][] values) {
+        int height = values.length;
+        int width = values[0].length;
+        ByteProcessor processor = new ByteProcessor(width, height);
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                processor.set(x, y, values[y][x]);
+            }
+        }
+        return processor;
     }
 }

@@ -7,6 +7,7 @@ import ij.process.AutoThresholder;
 import ij.process.ByteProcessor;
 import ij.process.ImageProcessor;
 import macro.builder.image.FilterExecutor;
+import macro.builder.image.dag.IjmToDagLoader;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -14,6 +15,23 @@ import java.util.List;
 public final class ThresholdShootoutRunner {
 
     public List<ShootoutResult> run(ImagePlus source, String macro, ShootoutSettings settings) {
+        return run(source, macro, settings, null);
+    }
+
+    public List<ShootoutResult> run(
+            ImagePlus source,
+            String macro,
+            ShootoutSettings settings,
+            FilterExecutor.Progress progress) {
+        return run(source, macro, settings, 1, progress);
+    }
+
+    public List<ShootoutResult> run(
+            ImagePlus source,
+            String macro,
+            ShootoutSettings settings,
+            int primaryChannel,
+            FilterExecutor.Progress progress) {
         if (source == null) {
             throw new IllegalArgumentException("source must not be null");
         }
@@ -21,7 +39,7 @@ public final class ThresholdShootoutRunner {
             throw new IllegalArgumentException("settings must not be null");
         }
 
-        ImagePlus processed = duplicate(source);
+        ImagePlus processed = duplicateForMacro(source, macro, primaryChannel);
         if (processed == null) {
             List<ShootoutResult> rows = new ArrayList<ShootoutResult>();
             rows.add(ShootoutResult.failure(settings.countingMode, "Macro", null, "Could not duplicate source image"));
@@ -29,7 +47,7 @@ public final class ThresholdShootoutRunner {
         }
 
         try {
-            FilterExecutor.runThreadSafe(processed, macro == null ? "" : macro);
+            FilterExecutor.runThreadSafe(processed, macro == null ? "" : macro, progress);
             Range range = measureRange(processed);
             return runThresholds(processed, range, settings);
         } catch (RuntimeException ex) {
@@ -243,6 +261,16 @@ public final class ThresholdShootoutRunner {
             return range.maximum;
         }
         return range.minimum + (range.maximum - range.minimum) * bin / 255.0;
+    }
+
+    private static ImagePlus duplicateForMacro(ImagePlus source, String macro, int primaryChannel) {
+        if (IjmToDagLoader.loadEmbeddedDag(macro) != null) {
+            return duplicate(source);
+        }
+        return FilterExecutor.duplicateChannel(
+                source,
+                Math.max(1, primaryChannel),
+                "Macro Builder Count Shootout Source");
     }
 
     private static ImagePlus duplicate(ImagePlus source) {

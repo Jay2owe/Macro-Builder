@@ -614,16 +614,15 @@ public final class FilterExecutor {
         return out;
     }
 
-    private static ImagePlus cloneChannelStack(ImagePlus source, int sourceChannel, String label)
-            throws DagRejectedException {
+    public static ImagePlus duplicateChannel(ImagePlus source, int sourceChannel, String title) {
         if (source == null || source.getStack() == null) {
-            throw new DagRejectedException("Source image is required");
+            throw new IllegalArgumentException("Source image is required");
         }
         int channels = Math.max(1, source.getNChannels());
         int slices = Math.max(1, source.getNSlices());
         int frames = Math.max(1, source.getNFrames());
         if (sourceChannel < 1 || sourceChannel > channels) {
-            throw new DagRejectedException("Branch source channel C" + sourceChannel
+            throw new IllegalArgumentException("Source channel C" + sourceChannel
                     + " is not available; image has C=" + channels);
         }
 
@@ -647,13 +646,29 @@ public final class FilterExecutor {
             }
         }
 
-        ImagePlus out = new ImagePlus(source.getTitle() + "-" + label + "-C" + sourceChannel, copy);
+        ImagePlus out = new ImagePlus(title == null ? source.getTitle() + "-C" + sourceChannel : title, copy);
         if (source.getCalibration() != null) out.setCalibration(source.getCalibration().copy());
         if (slices * frames == copy.getSize()) {
             out.setDimensions(1, slices, frames);
             if (source.isHyperStack()) out.setOpenAsHyperStack(true);
         }
         return out;
+    }
+
+    private static ImagePlus cloneChannelStack(ImagePlus source, int sourceChannel, String label)
+            throws DagRejectedException {
+        try {
+            String baseTitle = source == null ? "source" : source.getTitle();
+            return duplicateChannel(source, sourceChannel, baseTitle + "-" + label + "-C" + sourceChannel);
+        } catch (IllegalArgumentException ex) {
+            String message = ex.getMessage();
+            if (message != null && message.startsWith("Source channel")) {
+                int channels = source == null ? 0 : Math.max(1, source.getNChannels());
+                throw new DagRejectedException("Branch source channel C" + sourceChannel
+                        + " is not available; image has C=" + channels);
+            }
+            throw new DagRejectedException(message == null ? "Source image is required" : message);
+        }
     }
 
     private static ImagePlus combineNative(Combiner combiner, List<ImagePlus> inputs)

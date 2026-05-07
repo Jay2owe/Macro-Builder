@@ -6,6 +6,7 @@ import macro.builder.analysis.ShootoutSettings;
 import macro.builder.image.FilterExecutor;
 import macro.builder.image.dag.DagIR;
 import macro.builder.image.dag.DagIRSerializer;
+import macro.builder.image.dag.IjmToDagLoader;
 import macro.builder.ui.MacroPreviewHandler;
 import macro.builder.ui.RecorderDialog;
 import macro.builder.ui.ThresholdShootoutDialog;
@@ -107,7 +108,9 @@ public class Macro_Builder implements PlugIn {
         private String lastMacroSource = "none";
         private ShootoutSettings lastShootoutSettings = ShootoutSettings.defaults();
         private DagIR lastDag;
+        private int selectedPrimaryChannel = 1;
         private static final String LAST_OPENED_IMAGE_PATH_FILE = "last-opened-image-path.txt";
+        private static final String PRIMARY_CHANNEL_STATE_FILE = "primary-channel.txt";
         private static final String[] BIO_FORMATS_CONTAINER_EXTENSIONS = {
                 "lif", "czi", "nd2", "oib", "oif", "lsm", "zvi", "ome",
                 "ims", "vsi", "lei", "mvd2", "mrxs", "svs", "scn"
@@ -524,6 +527,7 @@ public class Macro_Builder implements PlugIn {
                     "Standalone image", stateDir, 0, lastMacro, createSandboxPreviewHandler());
             if (result == null || result.dag == null || result.ijmFallback == null) return;
             lastDag = result.dag;
+            selectedPrimaryChannel = Math.max(1, result.dag.primaryChannel);
             lastMacro = result.ijmFallback;
             lastMacroSource = "visual builder";
             clearSavedMacroSelection();
@@ -631,7 +635,7 @@ public class Macro_Builder implements PlugIn {
         private void openCountTester() {
             if (!ensureMacroLoaded()) return;
             if (!ensureImage()) return;
-            ThresholdShootoutDialog.show(dialog, sourceImage, lastMacro,
+            ThresholdShootoutDialog.show(dialog, sourceImage, lastMacro, currentPrimaryChannel(),
                     new ThresholdShootoutDialog.SettingsListener() {
                         @Override public void settingsChanged(ShootoutSettings settings) {
                             lastShootoutSettings = settings;
@@ -678,7 +682,7 @@ public class Macro_Builder implements PlugIn {
                 private ImagePlus work;
 
                 @Override protected ImagePlus doInBackground() throws Exception {
-                    work = duplicateImage(selected, "Macro Builder Preview Source");
+                    work = duplicateForMacro(selected, "Macro Builder Preview Source", macroContent);
                     if (work == null) {
                         throw new IllegalStateException("Could not duplicate the selected image.");
                     }
@@ -723,7 +727,7 @@ public class Macro_Builder implements PlugIn {
                 private ImagePlus work;
 
                 @Override protected ImagePlus doInBackground() throws Exception {
-                    work = duplicateImage(selected, "Macro Builder Run Result");
+                    work = duplicateForMacro(selected, "Macro Builder Run Result", macroContent);
                     if (work == null) {
                         throw new IllegalStateException("Could not duplicate the selected image.");
                     }
@@ -866,7 +870,8 @@ public class Macro_Builder implements PlugIn {
                 BatchMacroExporter.ExportResult result = new BatchMacroExporter().export(
                         file,
                         lastMacro,
-                        lastShootoutSettings == null ? ShootoutSettings.defaults() : lastShootoutSettings);
+                        lastShootoutSettings == null ? ShootoutSettings.defaults() : lastShootoutSettings,
+                        currentPrimaryChannel());
                 setStatus("Saved " + result.wrapperMacro.getName()
                         + " with " + result.settingsJson.getName() + ".");
             } catch (Exception ex) {
@@ -1013,6 +1018,9 @@ public class Macro_Builder implements PlugIn {
             try {
                 lastMacro = new String(Files.readAllBytes(entry.macroFile.toPath()), StandardCharsets.UTF_8);
                 lastDag = loadDagSidecar(entry);
+                if (lastDag != null) {
+                    selectedPrimaryChannel = Math.max(1, lastDag.primaryChannel);
+                }
                 lastMacroSource = "saved macro: " + entry.macroFile.getName();
                 macroArea.setText(lastMacro);
                 macroArea.setCaretPosition(0);
@@ -1105,9 +1113,13 @@ public class Macro_Builder implements PlugIn {
                 try {
                     lastDag = DagIRSerializer.fromJson(new String(
                             Files.readAllBytes(dagFile.toPath()), StandardCharsets.UTF_8));
+                    selectedPrimaryChannel = Math.max(1, lastDag.primaryChannel);
                 } catch (Exception ignored) {
                     lastDag = null;
                 }
+            }
+            if (lastDag == null) {
+                loadPrimaryChannelState();
             }
             loadLastOpenedImagePath();
             lastMacroSource = lastMacro == null || lastMacro.trim().isEmpty() ? "none" : "loaded state";
@@ -1127,8 +1139,21 @@ public class Macro_Builder implements PlugIn {
                 } else if (dagFile.exists()) {
                     Files.delete(dagFile.toPath());
                 }
+                Files.write(new File(stateDir, PRIMARY_CHANNEL_STATE_FILE).toPath(),
+                        Integer.toString(currentPrimaryChannel()).getBytes(StandardCharsets.UTF_8));
             } catch (Exception ex) {
                 IJ.log("Macro Builder: could not write state: " + cleanMessage(ex));
+            }
+        }
+
+        private void loadPrimaryChannelState() {
+            File stateFile = new File(stateDir, PRIMARY_CHANNEL_STATE_FILE);
+            if (!stateFile.exists()) return;
+            try {
+                String text = new String(Files.readAllBytes(stateFile.toPath()), StandardCharsets.UTF_8).trim();
+                selectedPrimaryChannel = Math.max(1, Integer.parseInt(text));
+            } catch (Exception ignored) {
+                selectedPrimaryChannel = 1;
             }
         }
 
@@ -1236,6 +1261,20 @@ public class Macro_Builder implements PlugIn {
                     1, Math.max(1, source.getNFrames()));
             if (copy != null) copy.setTitle(title);
             return copy;
+        }
+
+        private int currentPrimaryChannel() {
+            if (lastDag != null) {
+                return Math.max(1, lastDag.primaryChannel);
+            }
+            return Math.max(1, selectedPrimaryChannel);
+        }
+
+        private ImagePlus duplicateForMacro(ImagePlus source, String title, String macroContent) {
+            if (IjmToDagLoader.loadEmbeddedDag(macroContent) != null) {
+                return duplicateImage(source, title);
+            }
+            return FilterExecutor.duplicateChannel(source, currentPrimaryChannel(), title);
         }
 
         private static void closeImageQuietly(ImagePlus imp) {

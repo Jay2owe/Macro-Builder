@@ -10,6 +10,7 @@ import macro.builder.analysis.ObjectCounter;
 import macro.builder.analysis.ShootoutResult;
 import macro.builder.analysis.ShootoutSettings;
 import macro.builder.analysis.ThresholdShootoutRunner;
+import macro.builder.image.FilterExecutor;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
@@ -20,6 +21,7 @@ import javax.swing.JFileChooser;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
+import javax.swing.JProgressBar;
 import javax.swing.JScrollPane;
 import javax.swing.JTable;
 import javax.swing.JTextField;
@@ -65,6 +67,7 @@ public final class ThresholdShootoutDialog {
 
     private final ImagePlus source;
     private final String macro;
+    private final int primaryChannel;
     private final JDialog dialog;
     private final SettingsListener settingsListener;
 
@@ -78,6 +81,7 @@ public final class ThresholdShootoutDialog {
     private final JCheckBox brightObjects = new JCheckBox("Bright objects on dark background", true);
     private final JLabel rangeLabel = new JLabel("Macro output range: not run yet.");
     private final JLabel statusLabel = new JLabel(" ");
+    private final JProgressBar progressBar = new JProgressBar(0, 100);
     private final ResultTableModel tableModel = new ResultTableModel();
     private final JTable table = new JTable(tableModel);
     private final JButton runButton = new JButton("Run");
@@ -97,9 +101,11 @@ public final class ThresholdShootoutDialog {
             Window owner,
             ImagePlus source,
             String macro,
+            int primaryChannel,
             SettingsListener settingsListener) {
         this.source = source;
         this.macro = macro == null ? "" : macro;
+        this.primaryChannel = Math.max(1, primaryChannel);
         this.settingsListener = settingsListener;
         this.dialog = new JDialog(owner, "Test Counts", Dialog.ModalityType.MODELESS);
         this.dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
@@ -112,15 +118,24 @@ public final class ThresholdShootoutDialog {
             IJ.log("Test Counts needs the Fiji desktop UI.");
             return;
         }
-        new ThresholdShootoutDialog(owner, source, macro, null).open();
+        new ThresholdShootoutDialog(owner, source, macro, 1, null).open();
     }
 
     public static void show(Window owner, ImagePlus source, String macro, SettingsListener settingsListener) {
+        show(owner, source, macro, 1, settingsListener);
+    }
+
+    public static void show(
+            Window owner,
+            ImagePlus source,
+            String macro,
+            int primaryChannel,
+            SettingsListener settingsListener) {
         if (GraphicsEnvironment.isHeadless()) {
             IJ.log("Test Counts needs the Fiji desktop UI.");
             return;
         }
-        new ThresholdShootoutDialog(owner, source, macro, settingsListener).open();
+        new ThresholdShootoutDialog(owner, source, macro, primaryChannel, settingsListener).open();
     }
 
     private void open() {
@@ -173,7 +188,13 @@ public final class ThresholdShootoutDialog {
         JPanel footer = new JPanel(new BorderLayout());
         footer.setBorder(BorderFactory.createEmptyBorder(0, 12, 10, 12));
         statusLabel.setBorder(BorderFactory.createEmptyBorder(0, 0, 4, 0));
-        footer.add(statusLabel, BorderLayout.NORTH);
+        progressBar.setStringPainted(true);
+        progressBar.setString("Idle");
+        progressBar.setValue(0);
+        JPanel statusPanel = new JPanel(new BorderLayout(0, 3));
+        statusPanel.add(statusLabel, BorderLayout.NORTH);
+        statusPanel.add(progressBar, BorderLayout.SOUTH);
+        footer.add(statusPanel, BorderLayout.NORTH);
 
         JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
         left.add(previewButton);
@@ -332,9 +353,15 @@ public final class ThresholdShootoutDialog {
         tableModel.setResults(results);
         rangeLabel.setText("Macro output range: running...");
         statusLabel.setText("Running count shootout...");
+        setProgressIndeterminate("Running count macro...");
         worker = new SwingWorker<List<ShootoutResult>, Void>() {
             @Override protected List<ShootoutResult> doInBackground() {
-                return new ThresholdShootoutRunner().run(source, macro, settings);
+                return new ThresholdShootoutRunner().run(
+                        source,
+                        macro,
+                        settings,
+                        primaryChannel,
+                        createMacroProgress("Running count macro"));
             }
 
             @Override protected void done() {
@@ -347,15 +374,20 @@ public final class ThresholdShootoutDialog {
 
     private void onShootoutDone(SwingWorker<List<ShootoutResult>, Void> finishedWorker) {
         List<ShootoutResult> rows;
+        boolean failed = false;
         try {
             rows = finishedWorker.get();
         } catch (InterruptedException ie) {
             Thread.currentThread().interrupt();
             rows = Collections.emptyList();
             statusLabel.setText("Count shootout interrupted.");
+            setProgressValue(0, "Interrupted.");
+            failed = true;
         } catch (ExecutionException ex) {
             rows = Collections.emptyList();
             statusLabel.setText("Count shootout failed: " + cleanMessage(ex.getCause()));
+            setProgressValue(0, "Failed.");
+            failed = true;
         }
 
         if (finishedWorker == worker) {
@@ -376,6 +408,9 @@ public final class ThresholdShootoutDialog {
         if (statusLabel.getText() == null || statusLabel.getText().trim().isEmpty()
                 || statusLabel.getText().startsWith("Running")) {
             statusLabel.setText(results.size() + " result row(s).");
+        }
+        if (!failed) {
+            setProgressValue(100, "Count shootout complete.");
         }
         updateControlState();
     }
@@ -533,18 +568,24 @@ public final class ThresholdShootoutDialog {
 
         batchCancelRequested = false;
         statusLabel.setText("Starting batch count shootout...");
+        setProgressIndeterminate("Starting batch...");
         batchWorker = new SwingWorker<BatchRunResult, Void>() {
             @Override protected BatchRunResult doInBackground() throws Exception {
                 List<BatchShootoutResult> rows = new BatchShootoutRunner().run(
                         batchFiles,
                         macro,
                         settings,
+                        primaryChannel,
                         new BatchShootoutRunner.Progress() {
                             @Override public void onStarted(int totalFiles) {
+                                setBatchProgress(0, totalFiles, "Batch count shootout: "
+                                        + totalFiles + " file(s).");
                                 setBatchStatus("Batch count shootout: " + totalFiles + " file(s).");
                             }
 
                             @Override public void onFileStarted(File file, int index, int totalFiles) {
+                                setBatchProgress(index - 1, totalFiles,
+                                        "Batch " + index + "/" + totalFiles + ": " + file.getName());
                                 setBatchStatus("Batch " + index + "/" + totalFiles + ": " + file.getName());
                             }
 
@@ -553,6 +594,8 @@ public final class ThresholdShootoutDialog {
                                     int index,
                                     int totalFiles,
                                     int rowCount) {
+                                setBatchProgress(index, totalFiles,
+                                        "Batch " + index + "/" + totalFiles + " complete.");
                                 setBatchStatus("Batch " + index + "/" + totalFiles
                                         + " complete: " + rowCount + " row(s).");
                             }
@@ -608,6 +651,7 @@ public final class ThresholdShootoutDialog {
         if (!isBatchBusy()) return;
         batchCancelRequested = true;
         statusLabel.setText("Cancelling batch after the current file...");
+        setProgressIndeterminate("Cancelling batch...");
         updateControlState();
     }
 
@@ -619,8 +663,10 @@ public final class ThresholdShootoutDialog {
         } catch (InterruptedException ie) {
             Thread.currentThread().interrupt();
             failure = "Batch count shootout interrupted.";
+            setProgressValue(0, "Interrupted.");
         } catch (ExecutionException ex) {
             failure = "Batch count shootout failed: " + cleanMessage(ex.getCause());
+            setProgressValue(0, "Failed.");
         }
 
         if (finishedWorker == batchWorker) {
@@ -641,6 +687,7 @@ public final class ThresholdShootoutDialog {
         String prefix = result.cancelled ? "Batch cancelled" : "Batch complete";
         statusLabel.setText(prefix + ": " + result.rows.size()
                 + " row(s) saved to " + result.csvFile.getName() + ".");
+        setProgressValue(result.cancelled ? progressBar.getValue() : 100, prefix + ".");
         updateControlState();
     }
 
@@ -657,6 +704,55 @@ public final class ThresholdShootoutDialog {
                 }
             }
         });
+    }
+
+    private FilterExecutor.Progress createMacroProgress(final String fallback) {
+        return new FilterExecutor.Progress() {
+            @Override public void setIndeterminate(String message) {
+                setProgressIndeterminate(message == null ? fallback : message);
+            }
+
+            @Override public void setProgress(int completedSteps, int totalSteps, String message) {
+                int value = totalSteps <= 0
+                        ? 0
+                        : (int) Math.round(100.0 * completedSteps / totalSteps);
+                setProgressValue(value, message == null ? fallback : message);
+            }
+        };
+    }
+
+    private void setBatchProgress(final int completed, final int total, final String message) {
+        int value = total <= 0 ? 0 : (int) Math.round(100.0 * completed / total);
+        setProgressValue(value, message);
+    }
+
+    private void setProgressIndeterminate(final String text) {
+        runOnEdt(new Runnable() {
+            @Override public void run() {
+                if (closed || !dialog.isDisplayable()) return;
+                progressBar.setIndeterminate(true);
+                progressBar.setString(text == null ? "Working..." : text);
+            }
+        });
+    }
+
+    private void setProgressValue(final int value, final String text) {
+        runOnEdt(new Runnable() {
+            @Override public void run() {
+                if (closed || !dialog.isDisplayable()) return;
+                progressBar.setIndeterminate(false);
+                progressBar.setValue(Math.max(0, Math.min(100, value)));
+                progressBar.setString(text == null ? "" : text);
+            }
+        });
+    }
+
+    private static void runOnEdt(Runnable runnable) {
+        if (SwingUtilities.isEventDispatchThread()) {
+            runnable.run();
+        } else {
+            SwingUtilities.invokeLater(runnable);
+        }
     }
 
     private static String buildCsv(List<ShootoutResult> rows) {

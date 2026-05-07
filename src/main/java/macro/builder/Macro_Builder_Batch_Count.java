@@ -40,6 +40,7 @@ public class Macro_Builder_Batch_Count implements PlugIn {
                     Collections.singletonList(input),
                     macro,
                     exportedSettings.settings,
+                    exportedSettings.primaryChannel,
                     new StatusProgress());
             File csv = new File(output, exportedSettings.resultsFile);
             Files.write(csv.toPath(), BatchShootoutRunner.buildCsv(rows).getBytes(StandardCharsets.UTF_8));

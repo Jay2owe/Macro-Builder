@@ -17,26 +17,39 @@ import ij.plugin.Duplicator;
 import ij.plugin.PlugIn;
 
 import javax.swing.BorderFactory;
+import javax.swing.Icon;
 import javax.swing.JButton;
 import javax.swing.JDialog;
 import javax.swing.JFileChooser;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
+import javax.swing.JProgressBar;
 import javax.swing.JScrollPane;
+import javax.swing.SwingConstants;
 import javax.swing.JTextArea;
 import javax.swing.SwingUtilities;
+import javax.swing.SwingWorker;
 import javax.swing.WindowConstants;
 import javax.swing.filechooser.FileNameExtensionFilter;
+import java.awt.BasicStroke;
 import java.awt.BorderLayout;
+import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
 import java.awt.GraphicsEnvironment;
+import java.awt.GridLayout;
+import java.awt.Insets;
+import java.awt.RenderingHints;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.ExecutionException;
 import java.util.List;
 import java.util.Locale;
 
@@ -56,21 +69,31 @@ public class Macro_Builder implements PlugIn {
     }
 
     private static final class SessionDialog {
+        private static final Dimension TILE_SIZE = new Dimension(96, 104);
+        private static final int TILE_ICON_SIZE = 44;
+        private static final int LEFT_COLUMN_WIDTH = 230;
+        private static final int RIGHT_COLUMN_WIDTH = 200;
+
         private final JDialog dialog = new JDialog((java.awt.Frame) null, "Macro Builder", false);
         private final JLabel imageLabel = new JLabel("No image selected.");
         private final JLabel sourceLabel = new JLabel("Macro source: none");
         private final JLabel statusLabel = new JLabel(" ");
+        private final JProgressBar macroProgress = new JProgressBar(0, 100);
         private final JTextArea macroArea = new JTextArea();
         private final File stateDir = defaultStateDir();
+        private final JButton openLastButton = new JButton("Open last image/container");
 
         private ImagePlus sourceImage;
         private ImagePlus macroPreview;
         private ImagePlus sandboxPreview;
         private ImagePlus recorderSample;
+        private SwingWorker<ImagePlus, Void> macroWorker;
+        private File lastOpenedImagePath;
         private String lastMacro;
         private String lastMacroSource = "none";
         private ShootoutSettings lastShootoutSettings = ShootoutSettings.defaults();
         private DagIR lastDag;
+        private static final String LAST_OPENED_IMAGE_PATH_FILE = "last-opened-image-path.txt";
         private static final String[] BIO_FORMATS_CONTAINER_EXTENSIONS = {
                 "lif", "czi", "nd2", "oib", "oif", "lsm", "zvi", "ome",
                 "ims", "vsi", "lei", "mvd2", "mrxs", "svs", "scn"
@@ -84,88 +107,166 @@ public class Macro_Builder implements PlugIn {
 
         void open() {
             dialog.pack();
-            dialog.setSize(new Dimension(780, 450));
+            dialog.setSize(new Dimension(980, 560));
             dialog.setLocationRelativeTo(null);
             dialog.setVisible(true);
         }
 
         private void buildUi() {
             dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
-            dialog.setLayout(new BorderLayout(8, 8));
+            dialog.setLayout(new BorderLayout(0, 0));
 
-            JPanel top = new JPanel(new BorderLayout(8, 6));
-            top.setBorder(BorderFactory.createEmptyBorder(10, 12, 0, 12));
-            JLabel header = new JLabel("Build a filter macro from one open image or image stack.");
-            header.setFont(header.getFont().deriveFont(Font.BOLD, 13f));
-            top.add(header, BorderLayout.NORTH);
-            top.add(imageLabel, BorderLayout.CENTER);
+            JPanel shell = new JPanel(new BorderLayout(12, 0));
+            shell.setBorder(BorderFactory.createEmptyBorder(12, 12, 8, 12));
+            shell.add(buildWorkflowPanel(), BorderLayout.WEST);
+            shell.add(buildMacroPanel(), BorderLayout.CENTER);
+            shell.add(buildActionColumn(), BorderLayout.EAST);
+            dialog.add(shell, BorderLayout.CENTER);
 
-            JPanel imageButtons = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
-            JButton current = new JButton("Use current Fiji image");
-            JButton open = new JButton("Open image/container...");
-            current.addActionListener(e -> useCurrentImage(true));
-            open.addActionListener(e -> openImageFromDisk());
-            imageButtons.add(current);
-            imageButtons.add(open);
-            top.add(imageButtons, BorderLayout.SOUTH);
-            dialog.add(top, BorderLayout.NORTH);
-
-            macroArea.setEditable(false);
-            macroArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
-            macroArea.setLineWrap(false);
-            macroArea.setText("");
-            JScrollPane scroll = new JScrollPane(macroArea);
-            scroll.setBorder(BorderFactory.createTitledBorder("Last built macro"));
-            JPanel macroPanel = new JPanel(new BorderLayout(0, 4));
-            macroPanel.setBorder(BorderFactory.createEmptyBorder(0, 12, 0, 12));
-            macroPanel.add(sourceLabel, BorderLayout.NORTH);
-            macroPanel.add(scroll, BorderLayout.CENTER);
-            dialog.add(macroPanel, BorderLayout.CENTER);
-
-            JPanel footer = new JPanel(new BorderLayout());
+            JPanel footer = new JPanel(new BorderLayout(0, 3));
             footer.setBorder(BorderFactory.createEmptyBorder(0, 12, 10, 12));
-            statusLabel.setBorder(BorderFactory.createEmptyBorder(0, 0, 4, 0));
+            statusLabel.setBorder(BorderFactory.createEmptyBorder(0, 0, 2, 0));
+            macroProgress.setStringPainted(true);
+            macroProgress.setValue(0);
+            macroProgress.setString("Idle");
             footer.add(statusLabel, BorderLayout.NORTH);
-
-            JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
-            JButton build = new JButton("Build step-by-step");
-            JButton record = new JButton("Record in Fiji");
-            JButton preview = new JButton("Preview macro");
-            JButton run = new JButton("Run macro on selected image");
-            JButton testCounts = new JButton("Test counts...");
-            build.addActionListener(e -> openSandbox());
-            record.addActionListener(e -> openRecorder());
-            preview.addActionListener(e -> previewLastMacro());
-            run.addActionListener(e -> runLastMacroOnDuplicate());
-            testCounts.addActionListener(e -> openCountTester());
-            left.add(build);
-            left.add(record);
-            left.add(preview);
-            left.add(run);
-            left.add(testCounts);
-
-            JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
-            JButton save = new JButton("Save macro...");
-            JButton saveBatch = new JButton("Save batch macro...");
-            JButton close = new JButton("Close");
-            save.addActionListener(e -> saveCurrentMacro());
-            saveBatch.addActionListener(e -> saveBatchMacro());
-            close.addActionListener(e -> dialog.dispose());
-            right.add(save);
-            right.add(saveBatch);
-            right.add(close);
-
-            footer.add(left, BorderLayout.WEST);
-            footer.add(right, BorderLayout.EAST);
+            footer.add(macroProgress, BorderLayout.SOUTH);
             dialog.add(footer, BorderLayout.SOUTH);
 
             dialog.addWindowListener(new java.awt.event.WindowAdapter() {
                 @Override public void windowClosed(java.awt.event.WindowEvent e) {
+                    cancelMacroWorker();
                     closeImageQuietly(macroPreview);
                     closeImageQuietly(sandboxPreview);
                     closeImageQuietly(recorderSample);
                 }
             });
+        }
+
+        private JPanel buildWorkflowPanel() {
+            JPanel panel = new JPanel(new BorderLayout(0, 8));
+            Dimension columnSize = new Dimension(LEFT_COLUMN_WIDTH, TILE_SIZE.height * 2 + 34);
+            panel.setPreferredSize(columnSize);
+            panel.setMinimumSize(new Dimension(LEFT_COLUMN_WIDTH, 1));
+
+            JPanel content = new JPanel(new BorderLayout(0, 8));
+            JLabel title = new JLabel("Workflows");
+            title.setFont(title.getFont().deriveFont(Font.BOLD, 13f));
+            content.add(title, BorderLayout.NORTH);
+
+            JPanel grid = new JPanel(new GridLayout(2, 2, 8, 8));
+            grid.setPreferredSize(new Dimension(TILE_SIZE.width * 2 + 8, TILE_SIZE.height * 2 + 8));
+            JButton buildTile = createWorkflowTile("Build Macro",
+                    new WorkflowIcon(WorkflowIcon.BUILD), "Open the visual macro builder.");
+            JButton recordTile = createWorkflowTile("Macro Recorder",
+                    new WorkflowIcon(WorkflowIcon.RECORD), "Record filtering steps in Fiji.");
+            JButton countTile = createWorkflowTile("Test Counts",
+                    new WorkflowIcon(WorkflowIcon.COUNTS), "Test object counts with the current macro.");
+            JButton openImageTile = createWorkflowTile("Open Image/\nContainer",
+                    new WorkflowIcon(WorkflowIcon.OPEN_IMAGE), "Open an image, folder, or microscope container.");
+            buildTile.addActionListener(e -> openSandbox());
+            recordTile.addActionListener(e -> openRecorder());
+            countTile.addActionListener(e -> openCountTester());
+            openImageTile.addActionListener(e -> openImageFromDisk());
+            grid.add(buildTile);
+            grid.add(recordTile);
+            grid.add(countTile);
+            grid.add(openImageTile);
+            JPanel gridWrap = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+            gridWrap.add(grid);
+            content.add(gridWrap, BorderLayout.CENTER);
+            panel.add(content, BorderLayout.NORTH);
+            return panel;
+        }
+
+        private JPanel buildMacroPanel() {
+            macroArea.setEditable(false);
+            macroArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
+            macroArea.setLineWrap(false);
+            macroArea.setText("");
+
+            JPanel panel = new JPanel(new BorderLayout(0, 8));
+            JPanel imagePanel = new JPanel(new BorderLayout(0, 4));
+            JLabel imageTitle = new JLabel("Selected image");
+            imageTitle.setFont(imageTitle.getFont().deriveFont(Font.BOLD, 13f));
+            imagePanel.add(imageTitle, BorderLayout.NORTH);
+            imagePanel.add(imageLabel, BorderLayout.CENTER);
+
+            JPanel imageButtons = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
+            JButton current = createSecondaryButton("Use current Fiji image");
+            current.addActionListener(e -> useCurrentImage(true));
+            openLastButton.addActionListener(e -> openLastImageOrContainer());
+            openLastButton.setMargin(new Insets(3, 8, 3, 8));
+            openLastButton.setEnabled(false);
+            imageButtons.add(current);
+            imageButtons.add(openLastButton);
+            imagePanel.add(imageButtons, BorderLayout.SOUTH);
+            panel.add(imagePanel, BorderLayout.NORTH);
+
+            JScrollPane scroll = new JScrollPane(macroArea);
+            scroll.setBorder(BorderFactory.createTitledBorder("Last built macro"));
+            JPanel macroPanel = new JPanel(new BorderLayout(0, 4));
+            macroPanel.add(sourceLabel, BorderLayout.NORTH);
+            macroPanel.add(scroll, BorderLayout.CENTER);
+            panel.add(macroPanel, BorderLayout.CENTER);
+            return panel;
+        }
+
+        private JPanel buildActionColumn() {
+            JPanel panel = new JPanel(new BorderLayout(0, 8));
+            panel.setPreferredSize(new Dimension(RIGHT_COLUMN_WIDTH, 1));
+            panel.setMinimumSize(new Dimension(RIGHT_COLUMN_WIDTH, 1));
+
+            JPanel content = new JPanel(new BorderLayout(0, 8));
+            JLabel title = new JLabel("Last macro");
+            title.setFont(title.getFont().deriveFont(Font.BOLD, 13f));
+            content.add(title, BorderLayout.NORTH);
+
+            JPanel buttons = new JPanel(new GridLayout(0, 1, 0, 6));
+            JButton preview = createActionButton("Preview macro");
+            JButton run = createActionButton("Run macro");
+            JButton save = createActionButton("Save macro...");
+            JButton saveBatch = createActionButton("Save batch macro...");
+            JButton close = createActionButton("Close");
+            preview.addActionListener(e -> previewLastMacro());
+            run.addActionListener(e -> runLastMacroOnDuplicate());
+            save.addActionListener(e -> saveCurrentMacro());
+            saveBatch.addActionListener(e -> saveBatchMacro());
+            close.addActionListener(e -> dialog.dispose());
+            buttons.add(preview);
+            buttons.add(run);
+            buttons.add(save);
+            buttons.add(saveBatch);
+            buttons.add(close);
+            content.add(buttons, BorderLayout.CENTER);
+            panel.add(content, BorderLayout.NORTH);
+            return panel;
+        }
+
+        private JButton createWorkflowTile(String text, Icon icon, String tooltip) {
+            String label = text.replace("\n", "<br>");
+            JButton button = new JButton("<html><center>" + label + "</center></html>", icon);
+            button.setHorizontalTextPosition(SwingConstants.CENTER);
+            button.setVerticalTextPosition(SwingConstants.BOTTOM);
+            button.setPreferredSize(TILE_SIZE);
+            button.setMinimumSize(TILE_SIZE);
+            button.setMaximumSize(TILE_SIZE);
+            button.setFocusPainted(false);
+            button.setMargin(new Insets(6, 4, 6, 4));
+            button.setToolTipText(tooltip);
+            return button;
+        }
+
+        private JButton createSecondaryButton(String text) {
+            JButton button = new JButton(text);
+            button.setMargin(new Insets(3, 8, 3, 8));
+            return button;
+        }
+
+        private JButton createActionButton(String text) {
+            JButton button = new JButton(text);
+            button.setMargin(new Insets(4, 8, 4, 8));
+            return button;
         }
 
         private void useCurrentImage(boolean warnIfMissing) {
@@ -182,14 +283,8 @@ public class Macro_Builder implements PlugIn {
         }
 
         private void openImageFromDisk() {
-            JFileChooser chooser = new JFileChooser();
-            chooser.setDialogTitle("Open Image, Folder, or Container");
-            chooser.setFileSelectionMode(JFileChooser.FILES_AND_DIRECTORIES);
-            chooser.addChoosableFileFilter(new FileNameExtensionFilter(
-                    "Image files", "tif", "tiff", "png", "jpg", "jpeg", "gif", "bmp", "ics", "ids"));
-            chooser.addChoosableFileFilter(new FileNameExtensionFilter(
-                    "Bio-Formats containers", "lif", "czi", "nd2", "oib", "oif", "lsm", "zvi", "ome",
-                    "ims", "vsi", "lei", "mvd2", "mrxs", "svs", "scn"));
+            JFileChooser chooser = createImageChooser();
+            applyRememberedImagePath(chooser);
             if (chooser.showOpenDialog(dialog) != JFileChooser.APPROVE_OPTION) return;
             File selected = chooser.getSelectedFile();
             OpenAttempt opened = openImageOrContainer(selected);
@@ -202,7 +297,51 @@ public class Macro_Builder implements PlugIn {
                 return;
             }
             sourceImage = opened.image;
+            rememberOpenedImagePath(selected);
             refreshImageLabel();
+        }
+
+        private void openLastImageOrContainer() {
+            File remembered = existingLastOpenedImagePath();
+            if (remembered == null) {
+                clearRememberedImagePath();
+                IJ.showMessage("Macro Builder", "The last opened image or container could not be found.");
+                return;
+            }
+
+            OpenAttempt opened = openImageOrContainer(remembered);
+            if (opened.cancelled) return;
+            if (opened.image == null) {
+                IJ.showMessage("Macro Builder", opened.message == null
+                        ? "Fiji could not reopen the last image or container."
+                        : opened.message);
+                return;
+            }
+            sourceImage = opened.image;
+            rememberOpenedImagePath(remembered);
+            refreshImageLabel();
+        }
+
+        private JFileChooser createImageChooser() {
+            JFileChooser chooser = new JFileChooser();
+            chooser.setDialogTitle("Open Image, Folder, or Container");
+            chooser.setFileSelectionMode(JFileChooser.FILES_AND_DIRECTORIES);
+            chooser.addChoosableFileFilter(new FileNameExtensionFilter(
+                    "Image files", "tif", "tiff", "png", "jpg", "jpeg", "gif", "bmp", "ics", "ids"));
+            chooser.addChoosableFileFilter(new FileNameExtensionFilter(
+                    "Bio-Formats containers", "lif", "czi", "nd2", "oib", "oif", "lsm", "zvi", "ome",
+                    "ims", "vsi", "lei", "mvd2", "mrxs", "svs", "scn"));
+            return chooser;
+        }
+
+        private void applyRememberedImagePath(JFileChooser chooser) {
+            File remembered = existingLastOpenedImagePath();
+            if (chooser == null || remembered == null) return;
+            File parent = remembered.getParentFile();
+            if (parent != null && parent.isDirectory()) {
+                chooser.setCurrentDirectory(parent);
+            }
+            chooser.setSelectedFile(remembered);
         }
 
         private OpenAttempt openImageOrContainer(File selected) {
@@ -386,21 +525,11 @@ public class Macro_Builder implements PlugIn {
         private MacroPreviewHandler createMacroPreviewHandler() {
             return new MacroPreviewHandler() {
                 @Override public void preview(String macroContent) throws Exception {
-                    if (!ensureImage()) return;
-                    ImagePlus work = duplicateImage(sourceImage, "Macro Builder Preview Source");
-                    try {
-                        FilterExecutor.runThreadSafe(work, macroContent);
-                        closeImageQuietly(macroPreview);
-                        work.setTitle("Macro Builder Preview");
-                        work.show();
-                        macroPreview = work;
-                        work = null;
-                    } finally {
-                        closeImageQuietly(work);
-                    }
+                    previewMacroAsync(macroContent);
                 }
 
                 @Override public void cleanup() {
+                    cancelMacroWorker();
                     closeImageQuietly(macroPreview);
                     macroPreview = null;
                 }
@@ -435,20 +564,7 @@ public class Macro_Builder implements PlugIn {
                 IJ.showMessage("Macro Builder", "No macro has been built or recorded yet.");
                 return;
             }
-            ImagePlus work = duplicateImage(sourceImage, "Macro Builder Run Result");
-            if (work == null) {
-                IJ.showMessage("Macro Builder", "Could not duplicate the selected image.");
-                return;
-            }
-            try {
-                FilterExecutor.runThreadSafe(work, lastMacro);
-                work.setTitle("Macro Builder Run Result");
-                work.show();
-                setStatus("Run complete on duplicate image.");
-            } catch (Exception ex) {
-                closeImageQuietly(work);
-                IJ.showMessage("Macro Builder", "Run failed:\n" + cleanMessage(ex));
-            }
+            runMacroOnDuplicateAsync(lastMacro);
         }
 
         private void openCountTester() {
@@ -471,11 +587,159 @@ public class Macro_Builder implements PlugIn {
                 IJ.showMessage("Macro Builder", "No macro has been built or recorded yet.");
                 return;
             }
-            try {
-                createMacroPreviewHandler().preview(lastMacro);
-                setStatus("Preview complete.");
-            } catch (Exception ex) {
-                IJ.showMessage("Macro Builder", "Preview failed:\n" + cleanMessage(ex));
+            previewMacroAsync(lastMacro);
+        }
+
+        private void previewMacroAsync(final String macroContent) {
+            if (!ensureImage() || !ensureMacroIdle()) return;
+            final ImagePlus selected = sourceImage;
+            startMacroProgress("Previewing macro...");
+            macroWorker = new SwingWorker<ImagePlus, Void>() {
+                private ImagePlus work;
+
+                @Override protected ImagePlus doInBackground() throws Exception {
+                    work = duplicateImage(selected, "Macro Builder Preview Source");
+                    if (work == null) {
+                        throw new IllegalStateException("Could not duplicate the selected image.");
+                    }
+                    FilterExecutor.runThreadSafe(work, macroContent, createMacroProgress("Previewing macro"));
+                    work.setTitle("Macro Builder Preview");
+                    return work;
+                }
+
+                @Override protected void done() {
+                    if (macroWorker == this) macroWorker = null;
+                    try {
+                        ImagePlus result = get();
+                        closeImageQuietly(macroPreview);
+                        result.show();
+                        macroPreview = result;
+                        finishMacroProgress("Preview complete.", true);
+                        setStatus("Preview complete.");
+                    } catch (CancellationException cancelled) {
+                        closeImageQuietly(work);
+                        finishMacroProgress("Preview cancelled.", false);
+                        setStatus("Preview cancelled.");
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                        closeImageQuietly(work);
+                        finishMacroProgress("Preview interrupted.", false);
+                        setStatus("Preview interrupted.");
+                    } catch (ExecutionException ex) {
+                        closeImageQuietly(work);
+                        finishMacroProgress("Preview failed.", false);
+                        IJ.showMessage("Macro Builder", "Preview failed:\n" + cleanMessage(ex.getCause()));
+                    }
+                }
+            };
+            macroWorker.execute();
+        }
+
+        private void runMacroOnDuplicateAsync(final String macroContent) {
+            if (!ensureImage() || !ensureMacroIdle()) return;
+            final ImagePlus selected = sourceImage;
+            startMacroProgress("Running macro on duplicate...");
+            macroWorker = new SwingWorker<ImagePlus, Void>() {
+                private ImagePlus work;
+
+                @Override protected ImagePlus doInBackground() throws Exception {
+                    work = duplicateImage(selected, "Macro Builder Run Result");
+                    if (work == null) {
+                        throw new IllegalStateException("Could not duplicate the selected image.");
+                    }
+                    FilterExecutor.runThreadSafe(work, macroContent, createMacroProgress("Running macro"));
+                    work.setTitle("Macro Builder Run Result");
+                    return work;
+                }
+
+                @Override protected void done() {
+                    if (macroWorker == this) macroWorker = null;
+                    try {
+                        ImagePlus result = get();
+                        result.show();
+                        finishMacroProgress("Run complete.", true);
+                        setStatus("Run complete on duplicate image.");
+                    } catch (CancellationException cancelled) {
+                        closeImageQuietly(work);
+                        finishMacroProgress("Run cancelled.", false);
+                        setStatus("Run cancelled.");
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                        closeImageQuietly(work);
+                        finishMacroProgress("Run interrupted.", false);
+                        setStatus("Run interrupted.");
+                    } catch (ExecutionException ex) {
+                        closeImageQuietly(work);
+                        finishMacroProgress("Run failed.", false);
+                        IJ.showMessage("Macro Builder", "Run failed:\n" + cleanMessage(ex.getCause()));
+                    }
+                }
+            };
+            macroWorker.execute();
+        }
+
+        private boolean ensureMacroIdle() {
+            if (macroWorker != null && !macroWorker.isDone()) {
+                setStatus("A macro is already running.");
+                return false;
+            }
+            return true;
+        }
+
+        private void cancelMacroWorker() {
+            if (macroWorker != null && !macroWorker.isDone()) {
+                macroWorker.cancel(true);
+            }
+        }
+
+        private FilterExecutor.Progress createMacroProgress(final String fallback) {
+            return new FilterExecutor.Progress() {
+                @Override public void setIndeterminate(String message) {
+                    setMacroProgressIndeterminate(message == null ? fallback : message);
+                }
+
+                @Override public void setProgress(int completedSteps, int totalSteps, String message) {
+                    int value = totalSteps <= 0
+                            ? 0
+                            : (int) Math.round(100.0 * completedSteps / totalSteps);
+                    setMacroProgressValue(value, message == null ? fallback : message);
+                }
+            };
+        }
+
+        private void startMacroProgress(String text) {
+            setMacroProgressIndeterminate(text);
+            setStatus(text);
+        }
+
+        private void finishMacroProgress(String text, boolean success) {
+            setMacroProgressValue(success ? 100 : 0, text);
+        }
+
+        private void setMacroProgressIndeterminate(final String text) {
+            runOnEdt(new Runnable() {
+                @Override public void run() {
+                    macroProgress.setIndeterminate(true);
+                    macroProgress.setString(text == null ? "Working..." : text);
+                }
+            });
+        }
+
+        private void setMacroProgressValue(final int value, final String text) {
+            runOnEdt(new Runnable() {
+                @Override public void run() {
+                    macroProgress.setIndeterminate(false);
+                    macroProgress.setValue(Math.max(0, Math.min(100, value)));
+                    macroProgress.setString(text == null ? "" : text);
+                }
+            });
+        }
+
+        private static void runOnEdt(Runnable runnable) {
+            if (SwingUtilities.isEventDispatchThread()) {
+                runnable.run();
+            } else {
+                SwingUtilities.invokeLater(runnable);
             }
         }
 
@@ -567,6 +831,7 @@ public class Macro_Builder implements PlugIn {
                     lastDag = null;
                 }
             }
+            loadLastOpenedImagePath();
             lastMacroSource = lastMacro == null || lastMacro.trim().isEmpty() ? "none" : "loaded state";
             refreshSourceLabel();
         }
@@ -587,6 +852,69 @@ public class Macro_Builder implements PlugIn {
             } catch (Exception ex) {
                 IJ.log("Macro Builder: could not write state: " + cleanMessage(ex));
             }
+        }
+
+        private void loadLastOpenedImagePath() {
+            File stateFile = new File(stateDir, LAST_OPENED_IMAGE_PATH_FILE);
+            if (!stateFile.exists()) {
+                refreshLastOpenedImageControls();
+                return;
+            }
+            try {
+                String path = new String(Files.readAllBytes(stateFile.toPath()), StandardCharsets.UTF_8).trim();
+                lastOpenedImagePath = path.isEmpty() ? null : new File(path);
+            } catch (Exception ignored) {
+                lastOpenedImagePath = null;
+            }
+            refreshLastOpenedImageControls();
+        }
+
+        private void rememberOpenedImagePath(File selected) {
+            if (selected == null) return;
+            try {
+                lastOpenedImagePath = selected.getCanonicalFile();
+            } catch (Exception ignored) {
+                lastOpenedImagePath = selected.getAbsoluteFile();
+            }
+            writeLastOpenedImagePath();
+            refreshLastOpenedImageControls();
+        }
+
+        private void writeLastOpenedImagePath() {
+            try {
+                if (!stateDir.exists() && !stateDir.mkdirs()) {
+                    IJ.log("Macro Builder: could not create state folder: " + stateDir.getAbsolutePath());
+                    return;
+                }
+                File stateFile = new File(stateDir, LAST_OPENED_IMAGE_PATH_FILE);
+                if (lastOpenedImagePath == null) {
+                    if (stateFile.exists()) Files.delete(stateFile.toPath());
+                    return;
+                }
+                Files.write(stateFile.toPath(),
+                        lastOpenedImagePath.getAbsolutePath().getBytes(StandardCharsets.UTF_8));
+            } catch (Exception ex) {
+                IJ.log("Macro Builder: could not remember last opened image: " + cleanMessage(ex));
+            }
+        }
+
+        private File existingLastOpenedImagePath() {
+            if (lastOpenedImagePath == null || !lastOpenedImagePath.exists()) return null;
+            return lastOpenedImagePath;
+        }
+
+        private void clearRememberedImagePath() {
+            lastOpenedImagePath = null;
+            writeLastOpenedImagePath();
+            refreshLastOpenedImageControls();
+        }
+
+        private void refreshLastOpenedImageControls() {
+            File remembered = existingLastOpenedImagePath();
+            openLastButton.setEnabled(remembered != null);
+            openLastButton.setToolTipText(remembered == null
+                    ? "No remembered image or container is available."
+                    : remembered.getAbsolutePath());
         }
 
         private void setStatus(String text) {
@@ -651,6 +979,102 @@ public class Macro_Builder implements PlugIn {
                 home = System.getProperty("user.home");
             }
             return new File(home, ".macro-builder");
+        }
+
+        private static final class WorkflowIcon implements Icon {
+            static final int BUILD = 0;
+            static final int RECORD = 1;
+            static final int COUNTS = 2;
+            static final int OPEN_IMAGE = 3;
+
+            private final int type;
+
+            WorkflowIcon(int type) {
+                this.type = type;
+            }
+
+            @Override public int getIconWidth() {
+                return TILE_ICON_SIZE;
+            }
+
+            @Override public int getIconHeight() {
+                return TILE_ICON_SIZE;
+            }
+
+            @Override public void paintIcon(java.awt.Component c, Graphics g, int x, int y) {
+                Graphics2D g2 = (Graphics2D) g.create();
+                try {
+                    g2.translate(x, y);
+                    g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                    if (type == BUILD) {
+                        paintBuild(g2);
+                    } else if (type == RECORD) {
+                        paintRecord(g2);
+                    } else if (type == COUNTS) {
+                        paintCounts(g2);
+                    } else {
+                        paintOpenImage(g2);
+                    }
+                } finally {
+                    g2.dispose();
+                }
+            }
+
+            private void paintBuild(Graphics2D g2) {
+                g2.setStroke(new BasicStroke(4f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                g2.setColor(new Color(0x4B5563));
+                g2.drawLine(12, 34, 33, 13);
+                g2.setStroke(new BasicStroke(2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                g2.drawLine(29, 9, 38, 18);
+                g2.setColor(new Color(0x2563EB));
+                g2.fillRoundRect(9, 8, 7, 15, 4, 4);
+                g2.setColor(new Color(0x1F2937));
+                g2.setStroke(new BasicStroke(3f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                g2.drawLine(14, 17, 34, 35);
+                g2.setStroke(new BasicStroke(2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                g2.drawLine(34, 35, 38, 31);
+            }
+
+            private void paintRecord(Graphics2D g2) {
+                g2.setColor(new Color(0xFEE2E2));
+                g2.fillOval(6, 6, 32, 32);
+                g2.setColor(new Color(0xDC2626));
+                g2.fillOval(12, 12, 20, 20);
+                g2.setColor(new Color(0x991B1B));
+                g2.setStroke(new BasicStroke(2f));
+                g2.drawOval(12, 12, 20, 20);
+            }
+
+            private void paintCounts(Graphics2D g2) {
+                g2.setColor(new Color(0xECFDF5));
+                g2.fillOval(5, 5, 34, 34);
+                g2.setColor(new Color(0x047857));
+                g2.setStroke(new BasicStroke(2f));
+                g2.drawOval(5, 5, 34, 34);
+                g2.setColor(new Color(0x10B981));
+                g2.fillOval(14, 13, 6, 6);
+                g2.fillOval(25, 14, 5, 5);
+                g2.fillOval(18, 25, 5, 5);
+                g2.fillOval(29, 27, 4, 4);
+                g2.setColor(new Color(0x065F46));
+                g2.drawLine(12, 34, 34, 10);
+            }
+
+            private void paintOpenImage(Graphics2D g2) {
+                g2.setColor(new Color(0xD97706));
+                g2.fillRoundRect(7, 12, 15, 9, 4, 4);
+                g2.setColor(new Color(0xF59E0B));
+                g2.fillRoundRect(5, 17, 34, 21, 5, 5);
+                g2.setColor(new Color(0xFFFFFF));
+                g2.fillRect(18, 21, 15, 12);
+                g2.setColor(new Color(0x2563EB));
+                g2.fillOval(21, 23, 4, 4);
+                g2.setColor(new Color(0x16A34A));
+                g2.fillPolygon(new int[] {19, 26, 32}, new int[] {33, 27, 33}, 3);
+                g2.setColor(new Color(0x92400E));
+                g2.setStroke(new BasicStroke(2f));
+                g2.drawRoundRect(5, 17, 34, 21, 5, 5);
+            }
         }
 
         private static final class OpenAttempt {

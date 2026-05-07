@@ -70,10 +70,12 @@ public class Macro_Builder implements PlugIn {
     }
 
     private static final class SessionDialog {
-        private static final Dimension TILE_SIZE = new Dimension(96, 104);
-        private static final int TILE_ICON_SIZE = 44;
-        private static final int LEFT_COLUMN_WIDTH = 230;
+        private static final int TILE_GRID_GAP = 8;
+        private static final Dimension TILE_SIZE = new Dimension(96, 98);
+        private static final int TILE_ICON_SIZE = 42;
+        private static final int LEFT_COLUMN_WIDTH = 210;
         private static final int RIGHT_COLUMN_WIDTH = 200;
+        private static final int MACRO_ACTION_BUTTON_HEIGHT = 30;
 
         private final JDialog dialog = new JDialog((java.awt.Frame) null, "Macro Builder", false);
         private final JLabel imageLabel = new JLabel("No image selected.");
@@ -126,7 +128,7 @@ public class Macro_Builder implements PlugIn {
             dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
             dialog.setLayout(new BorderLayout(0, 0));
 
-            JPanel shell = new JPanel(new BorderLayout(12, 0));
+            JPanel shell = new JPanel(new BorderLayout(10, 0));
             shell.setBorder(BorderFactory.createEmptyBorder(12, 12, 8, 12));
             shell.add(buildWorkflowPanel(), BorderLayout.WEST);
             shell.add(buildMacroPanel(), BorderLayout.CENTER);
@@ -155,7 +157,8 @@ public class Macro_Builder implements PlugIn {
 
         private JPanel buildWorkflowPanel() {
             JPanel panel = new JPanel(new BorderLayout(0, 8));
-            Dimension columnSize = new Dimension(LEFT_COLUMN_WIDTH, TILE_SIZE.height * 2 + 34);
+            Dimension columnSize = new Dimension(LEFT_COLUMN_WIDTH,
+                    TILE_SIZE.height * 2 + TILE_GRID_GAP + 32);
             panel.setPreferredSize(columnSize);
             panel.setMinimumSize(new Dimension(LEFT_COLUMN_WIDTH, 1));
 
@@ -164,8 +167,10 @@ public class Macro_Builder implements PlugIn {
             title.setFont(title.getFont().deriveFont(Font.BOLD, 13f));
             content.add(title, BorderLayout.NORTH);
 
-            JPanel grid = new JPanel(new GridLayout(2, 2, 8, 8));
-            grid.setPreferredSize(new Dimension(TILE_SIZE.width * 2 + 8, TILE_SIZE.height * 2 + 8));
+            JPanel grid = new JPanel(new GridLayout(2, 2, TILE_GRID_GAP, TILE_GRID_GAP));
+            grid.setPreferredSize(new Dimension(
+                    TILE_SIZE.width * 2 + TILE_GRID_GAP,
+                    TILE_SIZE.height * 2 + TILE_GRID_GAP));
             JButton buildTile = createWorkflowTile("Build Macro",
                     new WorkflowIcon(WorkflowIcon.BUILD), "Open the visual macro builder.");
             JButton recordTile = createWorkflowTile("Macro Recorder",
@@ -243,17 +248,22 @@ public class Macro_Builder implements PlugIn {
 
             macroActionButtons.clear();
             JPanel buttons = new JPanel(new GridLayout(0, 1, 0, 8));
+            buttons.setPreferredSize(new Dimension(RIGHT_COLUMN_WIDTH,
+                    MACRO_ACTION_BUTTON_HEIGHT * 6 + 8 * 5));
             JButton run = createMacroActionButton("Run as batch...");
+            JButton save = createMacroActionButton("Save macro...");
             JButton saveBatch = createMacroActionButton("Save as batch macro...");
             JButton edit = createMacroActionButton("Edit Macro...");
             JButton variations = createMacroActionButton("Create Macro Variations...");
             JButton counts = createMacroActionButton("Test Counts...");
             run.addActionListener(e -> runAsBatchPlaceholder());
+            save.addActionListener(e -> saveCurrentMacro());
             saveBatch.addActionListener(e -> saveBatchMacro());
             edit.addActionListener(e -> editCurrentMacro());
             variations.addActionListener(e -> createMacroVariationsPlaceholder());
             counts.addActionListener(e -> openCountTester());
             buttons.add(run);
+            buttons.add(save);
             buttons.add(saveBatch);
             buttons.add(edit);
             buttons.add(variations);
@@ -273,7 +283,9 @@ public class Macro_Builder implements PlugIn {
             button.setMinimumSize(TILE_SIZE);
             button.setMaximumSize(TILE_SIZE);
             button.setFocusPainted(false);
-            button.setMargin(new Insets(6, 4, 6, 4));
+            button.setFont(button.getFont().deriveFont(11f));
+            button.setIconTextGap(2);
+            button.setMargin(new Insets(4, 4, 4, 4));
             button.setToolTipText(tooltip);
             return button;
         }
@@ -286,7 +298,13 @@ public class Macro_Builder implements PlugIn {
 
         private JButton createMacroActionButton(String text) {
             JButton button = new JButton(text);
-            button.setMargin(new Insets(4, 8, 4, 8));
+            Dimension size = new Dimension(RIGHT_COLUMN_WIDTH, MACRO_ACTION_BUTTON_HEIGHT);
+            button.setPreferredSize(size);
+            button.setMinimumSize(size);
+            button.setMaximumSize(size);
+            button.setFont(button.getFont().deriveFont(11f));
+            button.setMargin(new Insets(4, 6, 4, 6));
+            button.setToolTipText(text);
             macroActionButtons.add(button);
             return button;
         }

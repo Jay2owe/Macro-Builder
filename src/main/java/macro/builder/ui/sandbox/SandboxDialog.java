@@ -193,7 +193,7 @@ public final class SandboxDialog extends JDialog {
         canvasScroll.setBorder(BorderFactory.createEmptyBorder());
         canvasScroll.setMinimumSize(new Dimension(360, 1));
 
-        JLabel intro = new JLabel("Pick a step from 'Available steps' on the right, then click '+ Add step' on the branch you want it on.");
+        JLabel intro = new JLabel("Use the + buttons in grouped steps, or pick a step and click '+ Add step' on a branch.");
         intro.setOpaque(true);
         intro.setBackground(new Color(232, 244, 252));
         intro.setBorder(BorderFactory.createCompoundBorder(
@@ -258,11 +258,13 @@ public final class SandboxDialog extends JDialog {
 
     private void showSandboxHelp() {
         String msg = "<html><body style='width:380px;'>"
-                + "Build the channel's custom filter as a chain of steps. Pick a step "
-                + "from <b>Available steps</b> on the right, then click <b>+ Add step</b> "
-                + "on the branch you want it on. Double-click or right-click a step in "
-                + "<b>Your filter</b> to edit its settings. Double-click or right-click "
-                + "a merge card to edit how branches combine."
+                + "Build the channel's custom filter as a chain of steps. Use the "
+                + "<b>+</b> buttons in the grouped step boxes to add commands to the "
+                + "selected branch, or pick a step and click <b>+ Add step</b> on a "
+                + "branch. Double-click or right-click a step in <b>Your filter</b> "
+                + "to edit its settings. Ctrl-click or Shift-click branches, then use "
+                + "<b>Merge selected branches</b>. Double-click or right-click a merge "
+                + "card to edit how branches combine."
                 + "<br><br>"
                 + "<b>Start from a preset...</b><br>"
                 + "Replaces the current chain with one of the bundled filter presets "
@@ -270,10 +272,10 @@ public final class SandboxDialog extends JDialog {
                 + "<br><br>"
                 + "<b>Preview to selected point</b><br>"
                 + "Runs the chain only up to the step or merge you have selected, so you can "
-                + "see intermediate results."
+                + "see intermediate results in the embedded output preview."
                 + "<br><br>"
                 + "<b>Preview full filter</b><br>"
-                + "Runs the entire chain on the sample image."
+                + "Runs the entire chain on the sample image and updates the embedded output preview."
                 + "<br><br>"
                 + "<b>Save</b><br>"
                 + "Saves the current chain as the channel's custom filter."
@@ -282,7 +284,7 @@ public final class SandboxDialog extends JDialog {
                 + "Closes the builder without saving. You'll be asked to confirm if "
                 + "you've made changes."
                 + "</body></html>";
-        JOptionPane.showMessageDialog(this, msg, "Filter Builder — Help",
+        JOptionPane.showMessageDialog(this, msg, "Filter Builder - Help",
                 JOptionPane.INFORMATION_MESSAGE);
     }
 

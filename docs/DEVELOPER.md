@@ -23,6 +23,14 @@ src/test/java/                                       Parser and graph regression
 scripts/smoke-fiji.ps1                               Windows Fiji install helper
 ```
 
+The sandbox builder split is:
+
+- `SandboxDialog` owns the builder dialog layout, embedded source/output previews, footer actions, preset loading, save/cancel handling, and preview execution.
+- `FilterCatalog` owns grouped command discovery, search, category assignment, and row `+` add requests.
+- `DagCanvasPanel` renders branches, step cards, merge cards, branch selection, branch multi-select, context menus, and drag reorder.
+- `SandboxModel` owns the editable branch/merge state and converts it to and from `DagIR`.
+- `StepEditorDialog`, `MergeEditorDialog`, `ArgsEditorModel`, and `RecorderParameterProbe` handle inline parameter editing, merge editing, and Fiji command option capture.
+
 ## Build
 
 On Windows:
@@ -93,6 +101,7 @@ Current automated tests cover:
 
 - ImageJ macro parser behavior.
 - Visual graph serialization and round-tripping.
+- Sandbox catalog grouping, inline edit helpers, branch multi-selection, and selected-branch merge ordering.
 - Native `2D particles` and `3D stack objects` counting.
 - Single-image threshold shootouts, including native-scale fixed thresholds.
 - Batch count CSV behavior and window cleanup.

@@ -30,6 +30,8 @@ After restart, launch the plugin from `Plugins > Macro Builder > Macro Builder`.
 4. Use `Test Counts...` to compare threshold methods and count `2D particles` or `3D stack objects` from the processed macro output.
 5. Use `Save as batch macro...` to export a wrapper macro and settings for batch count runs.
 
+In `Build Macro`, steps are grouped by command type. Use the row `+` buttons to add commands, double-click or right-click sandbox steps to edit their parameters, preview selected or full results in the embedded preview pane, and Ctrl-click or Shift-click branches before `Merge selected branches`.
+
 For microscope container formats such as `.czi`, `.lif`, `.nd2`, `.oib`, `.oif`, `.lsm`, or `.zvi`, Fiji's Bio-Formats plugin must be available. Standard Fiji installations normally include it. Container files and folder-style datasets open through the Bio-Formats chooser, so you can select the specific series/image to use before running Macro Builder.
 
 ## Build From Source

@@ -29,6 +29,14 @@ Use one of the two `Workflows` authoring tiles:
 - `Build Macro`: opens the visual filter builder.
 - `Macro Recorder`: opens a recorder workflow for capturing ImageJ macro commands.
 
+The visual builder has source and output previews on the left, the sandbox in the middle, and grouped `Available steps` on the right. Step groups include filters, 3D commands, binary commands, image type conversions, plugins, and other Fiji commands.
+
+Use a row `+` button in `Available steps` to add that command to the selected branch. You can also select a command row, then click `+ Add step` on a branch. Double-click or right-click a step in the sandbox to edit its parameters. Right-click a step to preview to that point or delete it.
+
+Use `+ Add parallel branch` to add another branch. Ctrl-click branches to toggle them, or Shift-click to select a range, then click `Merge selected branches`. Double-click or right-click a merge card to change its operation or inputs.
+
+`Preview to selected point` runs only up to the selected step or merge card. `Preview full filter` runs the whole builder chain. Both preview buttons update the embedded output preview and leave the selected source image unchanged.
+
 The generated macro appears in the `Loaded Macro` panel.
 
 Choose a macro from `Load Saved Macro` to load its macro text. Macro Builder also loads the matching `.dag.json` sidecar when one exists.

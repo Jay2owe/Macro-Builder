@@ -1,6 +1,7 @@
 package macro.builder.ui.sandbox;
 
 import macro.builder.image.FilterMacroParser.OpType;
+import macro.builder.image.dag.Combiner;
 import macro.builder.image.dag.DagIR;
 import macro.builder.image.dag.DagLine;
 import macro.builder.image.dag.DagNode;
@@ -83,6 +84,11 @@ public class SandboxModelTest {
                 model.combiners.get(0).inputs);
         assertEquals(model.combiners.get(0), model.selected);
         assertTrue(model.selectedLinesInVisualOrder().isEmpty());
+
+        DagIR dag = model.toDag();
+        Combiner savedCombiner = dag.combiners.get(0);
+        assertEquals(Arrays.asList("line_A", "line_C", "line_D"), savedCombiner.inputs);
+        assertEquals(savedCombiner.id, dag.output);
     }
 
     @Test

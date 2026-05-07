@@ -55,6 +55,19 @@ public class FilterCatalogTest {
     }
 
     @Test
+    public void catalogGroupsPluginCommandsFromPluginsMenu() {
+        FilterCatalog catalog = new FilterCatalog(Collections.singletonList(
+                FilterCatalog.Entry.legacy("Tier 2", "Lab Plugin Filter",
+                        "Plugins > Filters > Lab Plugin Filter")));
+
+        catalog.setSearchTextForTests("Lab Plugin");
+
+        assertEquals(Collections.singletonList(FilterCatalog.CatalogGroup.PLUGINS),
+                catalog.visibleGroupsForTests());
+        assertVisible(catalog, "Lab Plugin Filter");
+    }
+
+    @Test
     public void searchMatchesLabelCategoryMenuPathBadgeAndGroupTitle() {
         List<FilterCatalog.Entry> tierTwo = Arrays.asList(
                 FilterCatalog.Entry.legacy("Tier 2", "Lab Plugin Filter",

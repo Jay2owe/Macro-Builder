@@ -180,9 +180,9 @@ public final class DagCanvasPanel extends JPanel {
 
         String command = node.commandName.length() > 0 ? node.commandName : DagToIjmEmitter.commandFor(node.type);
         String displayName = command == null ? node.type.name() : command;
-        String glyph = node.isLegacy() ? " 🐢" : "";
-        JLabel label = new JLabel("<html><b>" + displayName + glyph
-                + "</b><br><span style='font-size:9px;'>" + node.args + "</span></html>");
+        String badge = node.isLegacy() ? " [legacy]" : "";
+        JLabel label = new JLabel("<html><b>" + html(displayName + badge)
+                + "</b><br><span style='font-size:9px;'>" + html(node.args) + "</span></html>");
         String tooltip = node.isLegacy()
                 ? "Runs through Fiji's slower single-image path"
                 : "Runs through the fast batched path";
@@ -289,6 +289,15 @@ public final class DagCanvasPanel extends JPanel {
             if (action != null) action.run();
         });
         return item;
+    }
+
+    private static String html(String text) {
+        if (text == null) return "";
+        String escaped = text.replace("&", "&amp;");
+        escaped = escaped.replace("<", "&lt;");
+        escaped = escaped.replace(">", "&gt;");
+        escaped = escaped.replace("\"", "&quot;");
+        return escaped;
     }
 
     private int yToIndex(SandboxModel.Line line, int y) {

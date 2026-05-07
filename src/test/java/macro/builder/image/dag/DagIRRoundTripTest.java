@@ -89,13 +89,19 @@ public class DagIRRoundTripTest {
                 "combined",
                 "native");
 
+        String ijm = DagToIjmEmitter.emit(dag);
         DagIR roundTripped = DagIRSerializer.fromJson(DagIRSerializer.toJson(dag));
-        DagIR embedded = IjmToDagLoader.loadEmbeddedDag(DagToIjmEmitter.emit(dag));
+        DagIR embedded = IjmToDagLoader.loadEmbeddedDag(ijm);
 
         assertEquals(dag, roundTripped);
         assertEquals(dag, embedded);
         assertEquals(Arrays.asList("line_A", "line_B", "line_C"),
                 roundTripped.combiners.get(0).inputs);
+        assertTrue(ijm.indexOf("imageCalculator(\"AND create\", \"line_A\", \"line_B\");") >= 0);
+        assertTrue(ijm.indexOf("rename(\"combined_1\");") >= 0);
+        assertTrue(ijm.indexOf("imageCalculator(\"AND create\", \"combined_1\", \"line_C\");") >= 0);
+        assertTrue(ijm.indexOf("rename(\"combined\");") >= 0);
+        assertTrue(ijm.indexOf("selectImage(\"combined\");") >= 0);
     }
 
     @Test

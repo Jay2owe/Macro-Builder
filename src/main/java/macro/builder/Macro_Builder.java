@@ -19,6 +19,7 @@ import ij.plugin.PlugIn;
 import javax.swing.BorderFactory;
 import javax.swing.Icon;
 import javax.swing.JButton;
+import javax.swing.JComboBox;
 import javax.swing.JDialog;
 import javax.swing.JFileChooser;
 import javax.swing.JLabel;
@@ -81,7 +82,13 @@ public class Macro_Builder implements PlugIn {
         private final JProgressBar macroProgress = new JProgressBar(0, 100);
         private final JTextArea macroArea = new JTextArea();
         private final File stateDir = defaultStateDir();
+        private final File macroHistoryFile = new File(stateDir, "saved-macros.tsv");
+        private final JComboBox<MacroHistoryEntry> savedMacroCombo =
+                new JComboBox<MacroHistoryEntry>();
+        private final List<MacroHistoryEntry> savedMacroHistory =
+                new ArrayList<MacroHistoryEntry>();
         private final JButton openLastButton = new JButton("Open last image/container");
+        private boolean updatingSavedMacroCombo;
 
         private ImagePlus sourceImage;
         private ImagePlus macroPreview;
@@ -102,6 +109,7 @@ public class Macro_Builder implements PlugIn {
         SessionDialog() {
             buildUi();
             loadState();
+            loadSavedMacroHistory();
             useCurrentImage(false);
         }
 
@@ -206,7 +214,16 @@ public class Macro_Builder implements PlugIn {
             JScrollPane scroll = new JScrollPane(macroArea);
             scroll.setBorder(BorderFactory.createTitledBorder("Last built macro"));
             JPanel macroPanel = new JPanel(new BorderLayout(0, 4));
-            macroPanel.add(sourceLabel, BorderLayout.NORTH);
+            JPanel macroHeader = new JPanel(new BorderLayout(6, 4));
+            JLabel savedLabel = new JLabel("Saved macro");
+            savedMacroCombo.setEnabled(false);
+            savedMacroCombo.setPrototypeDisplayValue(new MacroHistoryEntry("Choose saved macro..."));
+            savedMacroCombo.addActionListener(e -> loadSelectedSavedMacro());
+            macroHeader.add(savedLabel, BorderLayout.WEST);
+            macroHeader.add(savedMacroCombo, BorderLayout.CENTER);
+            macroHeader.add(sourceLabel, BorderLayout.SOUTH);
+            refreshSavedMacroCombo(null);
+            macroPanel.add(macroHeader, BorderLayout.NORTH);
             macroPanel.add(scroll, BorderLayout.CENTER);
             panel.add(macroPanel, BorderLayout.CENTER);
             return panel;
@@ -475,6 +492,7 @@ public class Macro_Builder implements PlugIn {
             lastDag = result.dag;
             lastMacro = result.ijmFallback;
             lastMacroSource = "visual builder";
+            clearSavedMacroSelection();
             macroArea.setText(lastMacro);
             macroArea.setCaretPosition(0);
             writeState();
@@ -494,6 +512,7 @@ public class Macro_Builder implements PlugIn {
                 lastMacro = result.macroText;
                 lastMacroSource = "recorder";
                 lastDag = null;
+                clearSavedMacroSelection();
                 macroArea.setText(lastMacro);
                 macroArea.setCaretPosition(0);
                 writeState();
@@ -756,10 +775,15 @@ public class Macro_Builder implements PlugIn {
             File file = ensureExtension(chooser.getSelectedFile(), ".ijm");
             try {
                 Files.write(file.toPath(), lastMacro.getBytes(StandardCharsets.UTF_8));
+                File dagFile = dagSidecarFor(file);
                 if (lastDag != null) {
-                    File dagFile = dagSidecarFor(file);
                     Files.write(dagFile.toPath(), DagIRSerializer.toJson(lastDag).getBytes(StandardCharsets.UTF_8));
+                } else if (dagFile.exists()) {
+                    Files.delete(dagFile.toPath());
                 }
+                rememberSavedMacro(file);
+                lastMacroSource = "saved macro: " + file.getName();
+                refreshSourceLabel();
                 setStatus("Saved " + file.getName() + ".");
             } catch (Exception ex) {
                 IJ.showMessage("Macro Builder", "Could not save macro:\n" + cleanMessage(ex));
@@ -809,6 +833,205 @@ public class Macro_Builder implements PlugIn {
                     JOptionPane.OK_CANCEL_OPTION,
                     JOptionPane.WARNING_MESSAGE);
             return choice == JOptionPane.OK_OPTION;
+        }
+
+        private void loadSavedMacroHistory() {
+            savedMacroHistory.clear();
+            if (!macroHistoryFile.exists()) {
+                refreshSavedMacroCombo(null);
+                return;
+            }
+            try {
+                List<String> lines = Files.readAllLines(macroHistoryFile.toPath(), StandardCharsets.UTF_8);
+                for (String line : lines) {
+                    String path = historyPathFromLine(line);
+                    if (path == null) continue;
+                    File macroFile = canonicalFile(new File(path));
+                    if (!containsMacroHistoryFile(macroFile)) {
+                        savedMacroHistory.add(new MacroHistoryEntry(macroFile));
+                    }
+                }
+            } catch (Exception ex) {
+                IJ.log("Macro Builder: could not load saved macro history: " + cleanMessage(ex));
+            }
+            refreshSavedMacroCombo(null);
+        }
+
+        private void rememberSavedMacro(File file) {
+            if (file == null) return;
+            File macroFile = canonicalFile(file);
+            removeMacroHistoryFile(macroFile);
+            savedMacroHistory.add(0, new MacroHistoryEntry(macroFile));
+            writeSavedMacroHistory();
+            refreshSavedMacroCombo(macroFile);
+        }
+
+        private void writeSavedMacroHistory() {
+            try {
+                if (!stateDir.exists() && !stateDir.mkdirs()) {
+                    IJ.log("Macro Builder: could not create state folder: " + stateDir.getAbsolutePath());
+                    return;
+                }
+                if (savedMacroHistory.isEmpty()) {
+                    if (macroHistoryFile.exists()) Files.delete(macroHistoryFile.toPath());
+                    return;
+                }
+                StringBuilder text = new StringBuilder();
+                for (MacroHistoryEntry entry : savedMacroHistory) {
+                    if (entry.macroFile == null) continue;
+                    text.append(entry.macroFile.getAbsolutePath()).append(System.lineSeparator());
+                }
+                Files.write(macroHistoryFile.toPath(), text.toString().getBytes(StandardCharsets.UTF_8));
+            } catch (Exception ex) {
+                IJ.log("Macro Builder: could not write saved macro history: " + cleanMessage(ex));
+            }
+        }
+
+        private void refreshSavedMacroCombo(File selectedFile) {
+            updatingSavedMacroCombo = true;
+            try {
+                savedMacroCombo.removeAllItems();
+                if (savedMacroHistory.isEmpty()) {
+                    savedMacroCombo.addItem(new MacroHistoryEntry("No saved macros"));
+                    savedMacroCombo.setEnabled(false);
+                } else {
+                    savedMacroCombo.addItem(new MacroHistoryEntry("Choose saved macro..."));
+                    MacroHistoryEntry selectedEntry = null;
+                    for (MacroHistoryEntry entry : savedMacroHistory) {
+                        savedMacroCombo.addItem(entry);
+                        if (selectedFile != null && sameFile(entry.macroFile, selectedFile)) {
+                            selectedEntry = entry;
+                        }
+                    }
+                    savedMacroCombo.setEnabled(true);
+                    if (selectedEntry != null) {
+                        savedMacroCombo.setSelectedItem(selectedEntry);
+                    } else {
+                        savedMacroCombo.setSelectedIndex(0);
+                    }
+                }
+                refreshSavedMacroComboTooltip();
+            } finally {
+                updatingSavedMacroCombo = false;
+            }
+        }
+
+        private void refreshSavedMacroComboTooltip() {
+            Object selected = savedMacroCombo.getSelectedItem();
+            if (selected instanceof MacroHistoryEntry
+                    && ((MacroHistoryEntry) selected).macroFile != null) {
+                savedMacroCombo.setToolTipText(((MacroHistoryEntry) selected).macroFile.getAbsolutePath());
+            } else if (savedMacroHistory.isEmpty()) {
+                savedMacroCombo.setToolTipText("No saved macros have been saved yet.");
+            } else {
+                savedMacroCombo.setToolTipText("Choose a saved macro to load.");
+            }
+        }
+
+        private void clearSavedMacroSelection() {
+            if (savedMacroCombo.getItemCount() == 0 || savedMacroHistory.isEmpty()) return;
+            updatingSavedMacroCombo = true;
+            try {
+                savedMacroCombo.setSelectedIndex(0);
+                refreshSavedMacroComboTooltip();
+            } finally {
+                updatingSavedMacroCombo = false;
+            }
+        }
+
+        private void loadSelectedSavedMacro() {
+            if (updatingSavedMacroCombo) return;
+            refreshSavedMacroComboTooltip();
+            Object selected = savedMacroCombo.getSelectedItem();
+            if (!(selected instanceof MacroHistoryEntry)) return;
+            MacroHistoryEntry entry = (MacroHistoryEntry) selected;
+            if (entry.macroFile == null) return;
+
+            if (!entry.macroFile.exists()) {
+                IJ.showMessage("Macro Builder", "Saved macro could not be found:\n"
+                        + entry.macroFile.getAbsolutePath()
+                        + "\n\nIt has been removed from the saved macro list.");
+                removeMacroHistoryEntry(entry);
+                return;
+            }
+
+            try {
+                lastMacro = new String(Files.readAllBytes(entry.macroFile.toPath()), StandardCharsets.UTF_8);
+                lastDag = loadDagSidecar(entry);
+                lastMacroSource = "saved macro: " + entry.macroFile.getName();
+                macroArea.setText(lastMacro);
+                macroArea.setCaretPosition(0);
+                writeState();
+                refreshSourceLabel();
+                setStatus("Loaded saved macro " + entry.macroFile.getName() + ".");
+            } catch (Exception ex) {
+                IJ.showMessage("Macro Builder", "Could not load saved macro:\n"
+                        + entry.macroFile.getAbsolutePath()
+                        + "\n\n" + cleanMessage(ex));
+            }
+        }
+
+        private DagIR loadDagSidecar(MacroHistoryEntry entry) {
+            if (entry.dagFile == null || !entry.dagFile.exists()) return null;
+            try {
+                return DagIRSerializer.fromJson(new String(
+                        Files.readAllBytes(entry.dagFile.toPath()), StandardCharsets.UTF_8));
+            } catch (Exception ex) {
+                IJ.log("Macro Builder: could not load DAG sidecar "
+                        + entry.dagFile.getAbsolutePath() + ": " + cleanMessage(ex));
+                return null;
+            }
+        }
+
+        private void removeMacroHistoryEntry(MacroHistoryEntry entry) {
+            if (entry == null || entry.macroFile == null) return;
+            removeMacroHistoryFile(entry.macroFile);
+            writeSavedMacroHistory();
+            refreshSavedMacroCombo(null);
+            setStatus("Removed missing saved macro from the list.");
+        }
+
+        private void removeMacroHistoryFile(File macroFile) {
+            if (macroFile == null) return;
+            for (int i = savedMacroHistory.size() - 1; i >= 0; i--) {
+                if (sameFile(savedMacroHistory.get(i).macroFile, macroFile)) {
+                    savedMacroHistory.remove(i);
+                }
+            }
+        }
+
+        private boolean containsMacroHistoryFile(File macroFile) {
+            if (macroFile == null) return false;
+            for (MacroHistoryEntry entry : savedMacroHistory) {
+                if (sameFile(entry.macroFile, macroFile)) return true;
+            }
+            return false;
+        }
+
+        private static String historyPathFromLine(String line) {
+            if (line == null) return null;
+            int tab = line.indexOf('\t');
+            String path = tab >= 0 ? line.substring(0, tab) : line;
+            path = path.trim();
+            return path.isEmpty() ? null : path;
+        }
+
+        private static File canonicalFile(File file) {
+            if (file == null) return null;
+            try {
+                return file.getCanonicalFile();
+            } catch (Exception ignored) {
+                return file.getAbsoluteFile();
+            }
+        }
+
+        private static boolean sameFile(File first, File second) {
+            if (first == null || second == null) return false;
+            String firstPath = canonicalFile(first).getAbsolutePath();
+            String secondPath = canonicalFile(second).getAbsolutePath();
+            return File.separatorChar == '\\'
+                    ? firstPath.equalsIgnoreCase(secondPath)
+                    : firstPath.equals(secondPath);
         }
 
         private void loadState() {
@@ -979,6 +1202,32 @@ public class Macro_Builder implements PlugIn {
                 home = System.getProperty("user.home");
             }
             return new File(home, ".macro-builder");
+        }
+
+        private static final class MacroHistoryEntry {
+            final File macroFile;
+            final File dagFile;
+            final String label;
+
+            MacroHistoryEntry(File macroFile) {
+                this(macroFile,
+                        macroFile == null ? null : dagSidecarFor(macroFile),
+                        macroFile == null ? "" : macroFile.getName());
+            }
+
+            MacroHistoryEntry(String label) {
+                this(null, null, label);
+            }
+
+            private MacroHistoryEntry(File macroFile, File dagFile, String label) {
+                this.macroFile = macroFile;
+                this.dagFile = dagFile;
+                this.label = label == null || label.trim().isEmpty() ? "" : label;
+            }
+
+            @Override public String toString() {
+                return label;
+            }
         }
 
         private static final class WorkflowIcon implements Icon {

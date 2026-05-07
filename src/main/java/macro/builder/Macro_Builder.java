@@ -87,6 +87,8 @@ public class Macro_Builder implements PlugIn {
                 new JComboBox<MacroHistoryEntry>();
         private final List<MacroHistoryEntry> savedMacroHistory =
                 new ArrayList<MacroHistoryEntry>();
+        private final List<JButton> macroActionButtons =
+                new ArrayList<JButton>();
         private final JButton openLastButton = new JButton("Open last image/container");
         private boolean updatingSavedMacroCombo;
 
@@ -239,22 +241,24 @@ public class Macro_Builder implements PlugIn {
             title.setFont(title.getFont().deriveFont(Font.BOLD, 13f));
             content.add(title, BorderLayout.NORTH);
 
-            JPanel buttons = new JPanel(new GridLayout(0, 1, 0, 6));
-            JButton preview = createActionButton("Preview macro");
-            JButton run = createActionButton("Run macro");
-            JButton save = createActionButton("Save macro...");
-            JButton saveBatch = createActionButton("Save batch macro...");
-            JButton close = createActionButton("Close");
-            preview.addActionListener(e -> previewLastMacro());
-            run.addActionListener(e -> runLastMacroOnDuplicate());
-            save.addActionListener(e -> saveCurrentMacro());
+            macroActionButtons.clear();
+            JPanel buttons = new JPanel(new GridLayout(0, 1, 0, 8));
+            JButton run = createMacroActionButton("Run as batch...");
+            JButton saveBatch = createMacroActionButton("Save as batch macro...");
+            JButton edit = createMacroActionButton("Edit Macro...");
+            JButton variations = createMacroActionButton("Create Macro Variations...");
+            JButton counts = createMacroActionButton("Test Counts...");
+            run.addActionListener(e -> runAsBatchPlaceholder());
             saveBatch.addActionListener(e -> saveBatchMacro());
-            close.addActionListener(e -> dialog.dispose());
-            buttons.add(preview);
+            edit.addActionListener(e -> editCurrentMacro());
+            variations.addActionListener(e -> createMacroVariationsPlaceholder());
+            counts.addActionListener(e -> openCountTester());
             buttons.add(run);
-            buttons.add(save);
             buttons.add(saveBatch);
-            buttons.add(close);
+            buttons.add(edit);
+            buttons.add(variations);
+            buttons.add(counts);
+            refreshMacroActionControls();
             content.add(buttons, BorderLayout.CENTER);
             panel.add(content, BorderLayout.NORTH);
             return panel;
@@ -280,9 +284,10 @@ public class Macro_Builder implements PlugIn {
             return button;
         }
 
-        private JButton createActionButton(String text) {
+        private JButton createMacroActionButton(String text) {
             JButton button = new JButton(text);
             button.setMargin(new Insets(4, 8, 4, 8));
+            macroActionButtons.add(button);
             return button;
         }
 
@@ -497,7 +502,7 @@ public class Macro_Builder implements PlugIn {
             macroArea.setCaretPosition(0);
             writeState();
             refreshSourceLabel();
-            setStatus("Built filter macro. Use Save macro... to export it.");
+            setStatus("Built filter macro. Macro actions are now available.");
         }
 
         private void openRecorder() {
@@ -517,7 +522,7 @@ public class Macro_Builder implements PlugIn {
                 macroArea.setCaretPosition(0);
                 writeState();
                 refreshSourceLabel();
-                setStatus("Recorded filter macro. Use Save macro... to export it.");
+                setStatus("Recorded filter macro. Macro actions are now available.");
             } finally {
                 closeImageQuietly(recorderSample);
                 recorderSample = null;
@@ -579,18 +584,12 @@ public class Macro_Builder implements PlugIn {
 
         private void runLastMacroOnDuplicate() {
             if (!ensureImage()) return;
-            if (lastMacro == null || lastMacro.trim().isEmpty()) {
-                IJ.showMessage("Macro Builder", "No macro has been built or recorded yet.");
-                return;
-            }
+            if (!ensureMacroLoaded()) return;
             runMacroOnDuplicateAsync(lastMacro);
         }
 
         private void openCountTester() {
-            if (lastMacro == null || lastMacro.trim().isEmpty()) {
-                IJ.showMessage("Macro Builder", "No macro has been built or recorded yet.");
-                return;
-            }
+            if (!ensureMacroLoaded()) return;
             if (!ensureImage()) return;
             ThresholdShootoutDialog.show(dialog, sourceImage, lastMacro,
                     new ThresholdShootoutDialog.SettingsListener() {
@@ -602,11 +601,33 @@ public class Macro_Builder implements PlugIn {
         }
 
         private void previewLastMacro() {
-            if (lastMacro == null || lastMacro.trim().isEmpty()) {
-                IJ.showMessage("Macro Builder", "No macro has been built or recorded yet.");
-                return;
-            }
+            if (!ensureMacroLoaded()) return;
             previewMacroAsync(lastMacro);
+        }
+
+        private void editCurrentMacro() {
+            if (!ensureMacroLoaded()) return;
+            writeState();
+            openSandbox();
+        }
+
+        private void runAsBatchPlaceholder() {
+            if (!ensureMacroLoaded()) return;
+            IJ.showMessage("Macro Builder",
+                    "Run as batch is not implemented yet.\n\nUse Test Counts... > Run batch... for now.");
+        }
+
+        private void createMacroVariationsPlaceholder() {
+            if (!ensureMacroLoaded()) return;
+            IJ.showMessage("Macro Builder", "Create Macro Variations is not implemented yet.");
+        }
+
+        private boolean ensureMacroLoaded() {
+            if (lastMacro == null || lastMacro.trim().isEmpty()) {
+                IJ.showMessage("Macro Builder", "No macro has been built, recorded, or loaded yet.");
+                return false;
+            }
+            return true;
         }
 
         private void previewMacroAsync(final String macroContent) {
@@ -763,10 +784,7 @@ public class Macro_Builder implements PlugIn {
         }
 
         private void saveCurrentMacro() {
-            if (lastMacro == null || lastMacro.trim().isEmpty()) {
-                IJ.showMessage("Macro Builder", "No macro has been built or recorded yet.");
-                return;
-            }
+            if (!ensureMacroLoaded()) return;
             JFileChooser chooser = new JFileChooser();
             chooser.setDialogTitle("Save Macro");
             chooser.setSelectedFile(new File("Macro_Builder_Filter.ijm"));
@@ -791,10 +809,7 @@ public class Macro_Builder implements PlugIn {
         }
 
         private void saveBatchMacro() {
-            if (lastMacro == null || lastMacro.trim().isEmpty()) {
-                IJ.showMessage("Macro Builder", "No macro has been built or recorded yet.");
-                return;
-            }
+            if (!ensureMacroLoaded()) return;
             List<String> warnings = MacroBatchCompatibility.warnings(lastMacro);
             if (!warnings.isEmpty() && !confirmBatchWarnings(warnings)) {
                 return;
@@ -1146,6 +1161,14 @@ public class Macro_Builder implements PlugIn {
 
         private void refreshSourceLabel() {
             sourceLabel.setText("Macro source: " + lastMacroSource);
+            refreshMacroActionControls();
+        }
+
+        private void refreshMacroActionControls() {
+            boolean hasMacro = lastMacro != null && !lastMacro.trim().isEmpty();
+            for (JButton button : macroActionButtons) {
+                button.setEnabled(hasMacro);
+            }
         }
 
         private static String describeImage(ImagePlus imp) {

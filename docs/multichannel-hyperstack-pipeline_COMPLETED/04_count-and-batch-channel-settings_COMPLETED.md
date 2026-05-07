@@ -204,4 +204,3 @@ For embedded DAG macros, add a test proving both channels remain available. A DA
 - Duplicating only the primary channel for embedded DAG macros would break auxiliary branches. Always detect embedded DAG macros before narrowing the source.
 - Extending `ShootoutSettings` itself may create unnecessary churn because it stores count settings, not macro source settings. Prefer `ExportedSettings` or runner parameters unless a broader settings object already exists by this stage.
 - Batch CSV currently reports source image channel count. Do not change CSV columns unless the user explicitly asks for output-source-channel metadata.
-

@@ -51,4 +51,3 @@ source hyperstack C1..Cn
 ## How to run a stage
 
 Run `/do-step docs/multichannel-hyperstack-pipeline/` to execute the first incomplete numbered stage.
-

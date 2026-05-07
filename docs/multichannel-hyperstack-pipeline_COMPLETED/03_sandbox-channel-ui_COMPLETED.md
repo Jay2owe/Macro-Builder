@@ -179,4 +179,3 @@ public void toDagPreservesPrimaryAndBranchChannels() {
 - The builder currently has limited horizontal space. Keep channel controls compact and attached to branch headers.
 - If source image channel count changes while the dialog is open, clamp selected channels on preview/run instead of allowing invalid metadata.
 - Too much explanatory text in the UI will make the builder noisy. Prefer labels and operation names over long help text.
-

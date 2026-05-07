@@ -161,4 +161,3 @@ Build the synthetic hyperstack in ImageJ stack order: C changes fastest, then Z,
 - ImageJ stack ordering is easy to get wrong. Use `source.getStackIndex(c, z, t)` instead of manual index arithmetic.
 - Some ImageJ commands in branch steps may alter dimensions. Keep existing combiner dimension validation strict so bad branch outputs fail clearly.
 - IJM fallback quoting can be brittle. Add an emitter assertion before relying on manual Fiji checks.
-

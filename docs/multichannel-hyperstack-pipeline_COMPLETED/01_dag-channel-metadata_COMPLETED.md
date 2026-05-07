@@ -164,4 +164,3 @@ public void oldDagJsonDefaultsToChannelOne() {
 - Breaking old saved `.dag.json` files would be a user-visible regression. Keep channel fields optional in `fromJson`.
 - Reordering constructor arguments can silently create wrong graphs. Prefer overloads or static helpers over changing existing argument order.
 - `version` does not need to be bumped just to add optional fields. If a bump is added, make sure old version 1 JSON still validates.
-

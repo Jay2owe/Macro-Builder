@@ -128,4 +128,3 @@ Optional local Fiji smoke check if relevant:
 - Documentation can overpromise named-channel support. Keep wording to numeric channels unless named channels are actually implemented.
 - Manual validation depends on a suitable multichannel image. If none is available, create a synthetic two-channel hyperstack in Fiji for the check.
 - Do not use this stage to sneak in broader UI polish. If validation exposes a real bug, fix the narrow bug and document it in the final report.
-

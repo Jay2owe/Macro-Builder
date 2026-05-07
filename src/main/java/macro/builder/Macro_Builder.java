@@ -76,6 +76,8 @@ public class Macro_Builder implements PlugIn {
         private static final int LEFT_COLUMN_WIDTH = 230;
         private static final int RIGHT_COLUMN_WIDTH = 200;
         private static final int MACRO_ACTION_BUTTON_HEIGHT = 30;
+        private static final int WORKFLOW_COLUMN_HEIGHT =
+                TILE_SIZE.height * 2 + TILE_GRID_GAP + 142;
 
         private final JDialog dialog = new JDialog((java.awt.Frame) null, "Macro Builder", false);
         private final JLabel imageLabel = new JLabel("No image selected.");
@@ -158,8 +160,7 @@ public class Macro_Builder implements PlugIn {
 
         private JPanel buildWorkflowPanel() {
             JPanel panel = new JPanel(new BorderLayout(0, 8));
-            Dimension columnSize = new Dimension(LEFT_COLUMN_WIDTH,
-                    TILE_SIZE.height * 2 + TILE_GRID_GAP + 142);
+            Dimension columnSize = new Dimension(LEFT_COLUMN_WIDTH, WORKFLOW_COLUMN_HEIGHT);
             panel.setPreferredSize(columnSize);
             panel.setMinimumSize(new Dimension(LEFT_COLUMN_WIDTH, 1));
 
@@ -226,7 +227,10 @@ public class Macro_Builder implements PlugIn {
             JPanel panel = new JPanel(new BorderLayout(0, 8));
             JScrollPane scroll = new JScrollPane(macroArea);
             scroll.setBorder(BorderFactory.createTitledBorder("Loaded Macro"));
+            scroll.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
+            scroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
             JPanel macroPanel = new JPanel(new BorderLayout(0, 4));
+            macroPanel.setPreferredSize(new Dimension(1, WORKFLOW_COLUMN_HEIGHT));
             JPanel macroHeader = new JPanel(new BorderLayout(6, 4));
             JLabel savedLabel = new JLabel("Load Saved Macro");
             savedMacroCombo.setEnabled(false);
@@ -238,7 +242,7 @@ public class Macro_Builder implements PlugIn {
             refreshSavedMacroCombo(null);
             macroPanel.add(macroHeader, BorderLayout.NORTH);
             macroPanel.add(scroll, BorderLayout.CENTER);
-            panel.add(macroPanel, BorderLayout.CENTER);
+            panel.add(macroPanel, BorderLayout.NORTH);
             return panel;
         }
 

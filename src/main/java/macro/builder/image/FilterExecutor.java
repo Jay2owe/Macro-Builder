@@ -456,7 +456,7 @@ public final class FilterExecutor {
         Map<String, Integer> remainingUses = countRemainingUses(dag);
 
         for (DagLine line : dag.lines) {
-            ImagePlus work = cloneStackPerSlice(source, line.id);
+            ImagePlus work = cloneChannelStack(source, line.sourceChannel, line.id);
             for (DagNode node : line.ops) {
                 executeOpOnStack(work, new FilterMacroParser.Op(node.type, node.args));
             }
@@ -614,21 +614,68 @@ public final class FilterExecutor {
         return out;
     }
 
+    private static ImagePlus cloneChannelStack(ImagePlus source, int sourceChannel, String label)
+            throws DagRejectedException {
+        if (source == null || source.getStack() == null) {
+            throw new DagRejectedException("Source image is required");
+        }
+        int channels = Math.max(1, source.getNChannels());
+        int slices = Math.max(1, source.getNSlices());
+        int frames = Math.max(1, source.getNFrames());
+        if (sourceChannel < 1 || sourceChannel > channels) {
+            throw new DagRejectedException("Branch source channel C" + sourceChannel
+                    + " is not available; image has C=" + channels);
+        }
+
+        ImageStack src = source.getStack();
+        int width = source.getWidth();
+        int height = source.getHeight();
+        ImageStack copy = new ImageStack(width, height);
+        for (int t = 1; t <= frames; t++) {
+            for (int z = 1; z <= slices; z++) {
+                int stackIndex = source.getStackIndex(sourceChannel, z, t);
+                ImageProcessor ip = src.getProcessor(stackIndex);
+                Rectangle oldRoi = ip.getRoi();
+                ip.setRoi(0, 0, width, height);
+                ImageProcessor cropped = ip.crop();
+                if (oldRoi != null) {
+                    ip.setRoi(oldRoi);
+                } else {
+                    ip.resetRoi();
+                }
+                copy.addSlice(src.getSliceLabel(stackIndex), cropped);
+            }
+        }
+
+        ImagePlus out = new ImagePlus(source.getTitle() + "-" + label + "-C" + sourceChannel, copy);
+        if (source.getCalibration() != null) out.setCalibration(source.getCalibration().copy());
+        if (slices * frames == copy.getSize()) {
+            out.setDimensions(1, slices, frames);
+            if (source.isHyperStack()) out.setOpenAsHyperStack(true);
+        }
+        return out;
+    }
+
     private static ImagePlus combineNative(Combiner combiner, List<ImagePlus> inputs)
             throws DagRejectedException {
         ImagePlus first = inputs.get(0);
         int width = first.getWidth();
         int height = first.getHeight();
-        int slices = first.getStackSize();
+        int stackSize = first.getStackSize();
+        int z = first.getNSlices();
+        int t = first.getNFrames();
         for (ImagePlus input : inputs) {
             if (input.getWidth() != width || input.getHeight() != height
-                    || input.getStackSize() != slices) {
+                    || input.getStackSize() != stackSize
+                    || input.getNChannels() != 1
+                    || input.getNSlices() != z
+                    || input.getNFrames() != t) {
                 throw new DagRejectedException("Combiner input dimensions differ: " + combiner.id);
             }
         }
 
         ImageStack out = new ImageStack(width, height);
-        for (int s = 1; s <= slices; s++) {
+        for (int s = 1; s <= stackSize; s++) {
             FloatProcessor fp = new FloatProcessor(width, height);
             int n = width * height;
             for (int i = 0; i < n; i++) {
@@ -638,10 +685,10 @@ public final class FilterExecutor {
         }
         ImagePlus result = new ImagePlus(combiner.id, out);
         if (first.getCalibration() != null) result.setCalibration(first.getCalibration().copy());
-        int c = first.getNChannels();
-        int z = first.getNSlices();
-        int t = first.getNFrames();
-        if (c * z * t == out.getSize()) result.setDimensions(c, z, t);
+        if (z * t == out.getSize()) {
+            result.setDimensions(1, z, t);
+            if (first.isHyperStack()) result.setOpenAsHyperStack(true);
+        }
         return result;
     }
 

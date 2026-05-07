@@ -57,6 +57,26 @@ public class DagIRRoundTripTest {
     }
 
     @Test
+    public void emittedIjmDuplicatesBranchSourceChannel() {
+        DagIR dag = new DagIR(1, 1,
+                Arrays.asList(
+                        new DagLine("line_A", Collections.<DagNode>emptyList(), 1),
+                        new DagLine("line_B", Collections.<DagNode>emptyList(), 2)),
+                Collections.singletonList(new Combiner("combined",
+                        CombinerOp.SUBTRACT,
+                        Arrays.asList("line_A", "line_B"))),
+                "combined",
+                "native");
+
+        String ijm = DagToIjmEmitter.emit(dag);
+
+        assertTrue(ijm.indexOf("getDimensions(width, height, channels, slices, frames);") >= 0);
+        assertTrue(ijm.indexOf("line_range = \"channels=1-1 slices=1-\" + slices + \" frames=1-\" + frames;") >= 0);
+        assertTrue(ijm.indexOf("line_range = \"channels=2-2 slices=1-\" + slices + \" frames=1-\" + frames;") >= 0);
+        assertTrue(ijm.indexOf("run(\"Duplicate...\", \"title=line_B duplicate \" + line_range);") >= 0);
+    }
+
+    @Test
     public void oldDagJsonDefaultsToChannelOne() {
         String json = "{\"version\":1,\"executionTier\":\"native\","
                 + "\"lines\":[{\"id\":\"line_A\",\"ops\":[]}],"

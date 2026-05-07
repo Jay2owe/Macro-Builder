@@ -19,12 +19,17 @@ public final class DagToIjmEmitter {
         sb.append("// @ihf-dag v1 executionTier=").append(dag.executionTier).append('\n');
         sb.append("// ").append(DagIRSerializer.toJson(dag)).append('\n');
         sb.append("source_id = getImageID();\n");
+        sb.append("getDimensions(width, height, channels, slices, frames);\n");
 
         for (int i = 0; i < dag.lines.size(); i++) {
             DagLine line = dag.lines.get(i);
             String lineId = macroIdentifier(line.id);
+            int channel = Math.max(1, line.sourceChannel);
             sb.append("selectImage(source_id);\n");
-            sb.append("run(\"Duplicate...\", \"title=").append(escapeMacroArg(lineId)).append(" duplicate\");\n");
+            sb.append("line_range = \"channels=").append(channel).append("-").append(channel)
+                    .append(" slices=1-\" + slices + \" frames=1-\" + frames;\n");
+            sb.append("run(\"Duplicate...\", \"title=").append(escapeMacroArg(lineId))
+                    .append(" duplicate \" + line_range);\n");
             sb.append(lineId).append(" = getImageID();\n");
             for (int j = 0; j < line.ops.size(); j++) {
                 DagNode node = line.ops.get(j);
@@ -152,4 +157,3 @@ public final class DagToIjmEmitter {
         return text.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 }
-

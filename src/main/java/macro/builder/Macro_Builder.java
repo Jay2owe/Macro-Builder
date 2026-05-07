@@ -325,23 +325,24 @@ public class Macro_Builder implements PlugIn {
             refreshImageLabel();
         }
 
-        private void openImageFromDisk() {
+        private boolean openImageFromDisk() {
             JFileChooser chooser = createImageChooser();
             applyRememberedImagePath(chooser);
-            if (chooser.showOpenDialog(dialog) != JFileChooser.APPROVE_OPTION) return;
+            if (chooser.showOpenDialog(dialog) != JFileChooser.APPROVE_OPTION) return false;
             File selected = chooser.getSelectedFile();
             OpenAttempt opened = openImageOrContainer(selected);
-            if (opened.cancelled) return;
+            if (opened.cancelled) return false;
             if (opened.image == null) {
                 IJ.showMessage("Macro Builder", opened.message == null
                         ? "Fiji could not open that file as an image or stack.\n\n"
                                 + "For microscope containers, this requires Fiji's Bio-Formats plugin."
                         : opened.message);
-                return;
+                return false;
             }
             sourceImage = opened.image;
             rememberOpenedImagePath(selected);
             refreshImageLabel();
+            return true;
         }
 
         private void openLastImageOrContainer() {
@@ -500,8 +501,10 @@ public class Macro_Builder implements PlugIn {
                 useCurrentImage(false);
             }
             if (sourceImage == null || sourceImage.getStack() == null) {
-                IJ.showMessage("Macro Builder", "Open an image or stack first.");
-                return false;
+                setStatus("Choose an image or stack to continue.");
+                return openImageFromDisk()
+                        && sourceImage != null
+                        && sourceImage.getStack() != null;
             }
             return true;
         }

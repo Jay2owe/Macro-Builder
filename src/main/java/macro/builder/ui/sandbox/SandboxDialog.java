@@ -59,7 +59,6 @@ public final class SandboxDialog extends JDialog {
     private final SandboxModel model;
     private final PreviewHandler previewHandler;
     private final CountDownLatch done = new CountDownLatch(1);
-    private final NodeEditorPanel nodeEditor;
     private final CombinerEditorPanel combinerEditor;
     private final DagCanvasPanel canvas;
     private final FilterCatalog catalog;
@@ -87,9 +86,6 @@ public final class SandboxDialog extends JDialog {
         this.initialIjm = DagToIjmEmitter.emit(model.toDag());
         this.initialNodeCount = countNodes(model);
         this.previewHandler = previewHandler;
-        this.nodeEditor = new NodeEditorPanel(new Runnable() {
-            @Override public void run() { canvas.rebuild(); }
-        });
         this.combinerEditor = new CombinerEditorPanel(model, new Runnable() {
             @Override public void run() { canvas.rebuild(); }
         });
@@ -101,6 +97,14 @@ public final class SandboxDialog extends JDialog {
         }, new DagCanvasPanel.NodeCreator() {
             @Override public boolean addNode(SandboxModel.Line line, FilterCatalog.Entry entry) {
                 return addCatalogNode(line, entry);
+            }
+        }, new DagCanvasPanel.NodeActionHandler() {
+            @Override public void editNode(SandboxModel.Line line, SandboxModel.Node node) {
+                editNodeInline(node);
+            }
+
+            @Override public void previewToNode(SandboxModel.Line line, SandboxModel.Node node) {
+                previewToNodeInline(node);
             }
         }, new Runnable() {
             @Override public void run() { refreshEditors(); }
@@ -187,10 +191,8 @@ public final class SandboxDialog extends JDialog {
         gbc.gridy = 0;
         gbc.weightx = 1.0;
         gbc.fill = GridBagConstraints.HORIZONTAL;
-        editors.add(nodeEditor, gbc);
-        gbc.gridy = 1;
         editors.add(combinerEditor, gbc);
-        gbc.gridy = 2;
+        gbc.gridy = 1;
         gbc.weighty = 1.0;
         gbc.fill = GridBagConstraints.BOTH;
         editors.add(new JPanel(), gbc);
@@ -267,8 +269,8 @@ public final class SandboxDialog extends JDialog {
         String msg = "<html><body style='width:380px;'>"
                 + "Build the channel's custom filter as a chain of steps. Pick a step "
                 + "from <b>Available steps</b> on the right, then click <b>+ Add step</b> "
-                + "on the branch you want it on. Click a step in <b>Your filter</b> to "
-                + "edit its settings."
+                + "on the branch you want it on. Double-click or right-click a step in "
+                + "<b>Your filter</b> to edit its settings."
                 + "<br><br>"
                 + "<b>Start from a preset...</b><br>"
                 + "Replaces the current chain with one of the bundled filter presets "
@@ -435,12 +437,30 @@ public final class SandboxDialog extends JDialog {
 
     private void refreshEditors() {
         Object selected = model.selected;
-        nodeEditor.setNode(selected instanceof SandboxModel.Node ? (SandboxModel.Node) selected : null);
         combinerEditor.setCombiner(selected instanceof SandboxModel.CombinerNode
                 ? (SandboxModel.CombinerNode) selected
                 : null);
         legacyBanner.setVisible(model.hasLegacyNode());
         refreshPreviewButtons();
+    }
+
+    private void editNodeInline(SandboxModel.Node node) {
+        if (node == null) return;
+        model.selected = node;
+        if (StepEditorDialog.show(this, node)) {
+            canvas.rebuild();
+            refreshEditors();
+        } else {
+            refreshEditors();
+        }
+    }
+
+    private void previewToNodeInline(SandboxModel.Node node) {
+        if (node == null) return;
+        model.selected = node;
+        canvas.rebuild();
+        refreshEditors();
+        preview(model.toPartialDag());
     }
 
     private SandboxModel.Line resolveTargetLine() {

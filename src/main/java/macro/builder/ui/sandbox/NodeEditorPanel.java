@@ -1,6 +1,5 @@
 package macro.builder.ui.sandbox;
 
-import macro.builder.image.FilterMacroEditorModel;
 import macro.builder.image.dag.DagToIjmEmitter;
 
 import javax.swing.BorderFactory;
@@ -12,7 +11,6 @@ import javax.swing.event.DocumentListener;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
-import java.util.ArrayList;
 import java.util.List;
 
 public final class NodeEditorPanel extends JPanel {
@@ -44,26 +42,26 @@ public final class NodeEditorPanel extends JPanel {
         String command = node.commandName.length() > 0 ? node.commandName : DagToIjmEmitter.commandFor(node.type);
         addLabel(command == null ? node.type.name() : command, 0, 0, 2, true);
 
-        List<Token> tokens = parseArgs(node.args);
+        List<ArgsEditorModel.Token> tokens = ArgsEditorModel.parse(node.args);
         int row = 1;
         int editableCount = 0;
         for (int i = 0; i < tokens.size(); i++) {
-            final Token token = tokens.get(i);
-            if (!token.editable) continue;
+            final ArgsEditorModel.Token token = tokens.get(i);
+            if (!token.isEditable()) continue;
             editableCount++;
-            addLabel(token.key, 0, row, 1, false);
-            String value = token.parameter.getValue();
+            addLabel(token.key(), 0, row, 1, false);
+            String value = token.value();
             final JTextField field = new JTextField(value, Math.max(6, Math.min(14, value.length() + 2)));
             addField(field, 1, row);
-            final List<Token> allTokens = tokens;
+            final List<ArgsEditorModel.Token> allTokens = tokens;
             field.getDocument().addDocumentListener(new DocumentListener() {
                 @Override public void insertUpdate(DocumentEvent e) { update(); }
                 @Override public void removeUpdate(DocumentEvent e) { update(); }
                 @Override public void changedUpdate(DocumentEvent e) { update(); }
                 private void update() {
                     if (rebuilding || NodeEditorPanel.this.node == null) return;
-                    token.parameter.setValue(field.getText().trim());
-                    NodeEditorPanel.this.node.args = renderArgs(allTokens);
+                    token.setValue(field.getText().trim());
+                    NodeEditorPanel.this.node.args = ArgsEditorModel.render(allTokens);
                     if (changeCallback != null) changeCallback.run();
                 }
             });
@@ -107,55 +105,4 @@ public final class NodeEditorPanel extends JPanel {
         add(field, gbc);
     }
 
-    private static List<Token> parseArgs(String args) {
-        List<Token> tokens = new ArrayList<Token>();
-        if (args == null || args.trim().isEmpty()) return tokens;
-        List<String> parts = RecorderParameterProbe.tokenizeOptions(args);
-        for (int i = 0; i < parts.size(); i++) {
-            String part = parts.get(i);
-            int equals = part.indexOf('=');
-            if (equals > 0 && equals < part.length() - 1) {
-                String key = part.substring(0, equals);
-                String value = part.substring(equals + 1);
-                tokens.add(new Token(key,
-                        new FilterMacroEditorModel.Parameter(key, value, value, "", "")));
-            } else {
-                tokens.add(new Token(part));
-            }
-        }
-        return tokens;
-    }
-
-    private static String renderArgs(List<Token> tokens) {
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < tokens.size(); i++) {
-            if (i > 0) sb.append(' ');
-            Token token = tokens.get(i);
-            if (token.editable) {
-                sb.append(token.key).append('=').append(token.parameter.getValue());
-            } else {
-                sb.append(token.key);
-            }
-        }
-        return sb.toString();
-    }
-
-    private static final class Token {
-        final String key;
-        final boolean editable;
-        final FilterMacroEditorModel.Parameter parameter;
-
-        Token(String key) {
-            this.key = key == null ? "" : key;
-            this.editable = false;
-            this.parameter = null;
-        }
-
-        Token(String key, FilterMacroEditorModel.Parameter parameter) {
-            this.key = key == null ? "" : key;
-            this.editable = true;
-            this.parameter = parameter;
-        }
-    }
 }
-

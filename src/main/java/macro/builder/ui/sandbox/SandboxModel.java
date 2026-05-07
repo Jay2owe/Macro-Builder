@@ -78,7 +78,7 @@ final class SandboxModel {
                 List<DagNode> nodes = new ArrayList<DagNode>();
                 for (int j = 0; j < line.nodes.size(); j++) {
                     Node node = line.nodes.get(j);
-                    nodes.add(new DagNode(node.id, node.type, node.args));
+                    nodes.add(new DagNode(node.id, node.type, node.args, node.commandName, node.menuPath));
                     if (node == selectedNode) break;
                 }
                 partialLines.add(new DagLine(line.id, nodes));
@@ -233,4 +233,3 @@ final class SandboxModel {
         }
     }
 }
-

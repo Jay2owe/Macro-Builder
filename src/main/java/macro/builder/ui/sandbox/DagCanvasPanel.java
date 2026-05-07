@@ -5,7 +5,10 @@ import macro.builder.image.dag.DagToIjmEmitter;
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JLabel;
+import javax.swing.JMenuItem;
 import javax.swing.JPanel;
+import javax.swing.JPopupMenu;
+import javax.swing.SwingUtilities;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.GridBagConstraints;
@@ -25,9 +28,15 @@ public final class DagCanvasPanel extends JPanel {
         boolean addNode(SandboxModel.Line line, FilterCatalog.Entry entry);
     }
 
+    public interface NodeActionHandler {
+        void editNode(SandboxModel.Line line, SandboxModel.Node node);
+        void previewToNode(SandboxModel.Line line, SandboxModel.Node node);
+    }
+
     private final SandboxModel model;
     private final CatalogSupplier catalogSupplier;
     private final NodeCreator nodeCreator;
+    private final NodeActionHandler nodeActionHandler;
     private final Runnable selectionCallback;
     private final Runnable changeCallback;
 
@@ -37,10 +46,18 @@ public final class DagCanvasPanel extends JPanel {
     public DagCanvasPanel(SandboxModel model, CatalogSupplier catalogSupplier,
                           NodeCreator nodeCreator,
                           Runnable selectionCallback, Runnable changeCallback) {
+        this(model, catalogSupplier, nodeCreator, null, selectionCallback, changeCallback);
+    }
+
+    public DagCanvasPanel(SandboxModel model, CatalogSupplier catalogSupplier,
+                          NodeCreator nodeCreator,
+                          NodeActionHandler nodeActionHandler,
+                          Runnable selectionCallback, Runnable changeCallback) {
         super(new GridBagLayout());
         this.model = model;
         this.catalogSupplier = catalogSupplier;
         this.nodeCreator = nodeCreator;
+        this.nodeActionHandler = nodeActionHandler;
         this.selectionCallback = selectionCallback;
         this.changeCallback = changeCallback;
         setBorder(BorderFactory.createTitledBorder("Your filter"));
@@ -169,6 +186,16 @@ public final class DagCanvasPanel extends JPanel {
 
         MouseAdapter adapter = new MouseAdapter() {
             @Override public void mousePressed(MouseEvent e) {
+                if (showNodeMenuIfRequested(e, line, node)) return;
+                if (!SwingUtilities.isLeftMouseButton(e)) return;
+                if (e.getClickCount() == 2) {
+                    dragLine = null;
+                    dragNode = null;
+                    model.selected = node;
+                    selected();
+                    if (nodeActionHandler != null) nodeActionHandler.editNode(line, node);
+                    return;
+                }
                 dragLine = line;
                 dragNode = node;
                 model.selected = node;
@@ -176,8 +203,18 @@ public final class DagCanvasPanel extends JPanel {
             }
 
             @Override public void mouseReleased(MouseEvent e) {
+                if (showNodeMenuIfRequested(e, line, node)) {
+                    dragLine = null;
+                    dragNode = null;
+                    return;
+                }
+                if (!SwingUtilities.isLeftMouseButton(e)) {
+                    dragLine = null;
+                    dragNode = null;
+                    return;
+                }
                 if (dragLine == null || dragNode == null) return;
-                Point p = javax.swing.SwingUtilities.convertPoint((Component) e.getSource(), e.getPoint(),
+                Point p = SwingUtilities.convertPoint((Component) e.getSource(), e.getPoint(),
                         DagCanvasPanel.this);
                 int newIndex = yToIndex(dragLine, p.y);
                 int oldIndex = dragLine.nodes.indexOf(dragNode);
@@ -194,6 +231,45 @@ public final class DagCanvasPanel extends JPanel {
         card.addMouseListener(adapter);
         label.addMouseListener(adapter);
         return card;
+    }
+
+    private boolean showNodeMenuIfRequested(MouseEvent e, SandboxModel.Line line, SandboxModel.Node node) {
+        if (!e.isPopupTrigger()) return false;
+        Point p = SwingUtilities.convertPoint((Component) e.getSource(), e.getPoint(), this);
+        model.selected = node;
+        selected();
+        buildNodeMenu(line, node).show(this, p.x, p.y);
+        return true;
+    }
+
+    private JPopupMenu buildNodeMenu(final SandboxModel.Line line, final SandboxModel.Node node) {
+        JPopupMenu menu = new JPopupMenu();
+        menu.add(menuItem("Edit parameters", new Runnable() {
+            @Override public void run() {
+                if (nodeActionHandler != null) nodeActionHandler.editNode(line, node);
+            }
+        }));
+        menu.add(menuItem("Preview to here", new Runnable() {
+            @Override public void run() {
+                if (nodeActionHandler != null) nodeActionHandler.previewToNode(line, node);
+            }
+        }));
+        menu.addSeparator();
+        menu.add(menuItem("Delete", new Runnable() {
+            @Override public void run() {
+                model.removeNode(line, node);
+                changedAndSelected();
+            }
+        }));
+        return menu;
+    }
+
+    private static JMenuItem menuItem(String label, final Runnable action) {
+        JMenuItem item = new JMenuItem(label);
+        item.addActionListener(e -> {
+            if (action != null) action.run();
+        });
+        return item;
     }
 
     private int yToIndex(SandboxModel.Line line, int y) {
@@ -288,4 +364,3 @@ public final class DagCanvasPanel extends JPanel {
         selected();
     }
 }
-

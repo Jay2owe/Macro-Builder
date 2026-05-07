@@ -436,7 +436,7 @@ public final class SandboxDialog extends JDialog {
 
     private void editNodeInline(SandboxModel.Node node) {
         if (node == null) return;
-        model.selected = node;
+        model.selectNode(node);
         if (StepEditorDialog.show(this, node)) {
             canvas.rebuild();
             refreshEditors();
@@ -447,7 +447,7 @@ public final class SandboxDialog extends JDialog {
 
     private void previewToNodeInline(SandboxModel.Node node) {
         if (node == null) return;
-        model.selected = node;
+        model.selectNode(node);
         canvas.rebuild();
         refreshEditors();
         preview(model.toPartialDag());
@@ -455,7 +455,7 @@ public final class SandboxDialog extends JDialog {
 
     private void editCombinerInline(SandboxModel.CombinerNode combiner) {
         if (combiner == null) return;
-        model.selected = combiner;
+        model.selectCombiner(combiner);
         if (MergeEditorDialog.show(this, model, combiner)) {
             canvas.rebuild();
             refreshEditors();
@@ -466,7 +466,7 @@ public final class SandboxDialog extends JDialog {
 
     private void previewToCombinerInline(SandboxModel.CombinerNode combiner) {
         if (combiner == null) return;
-        model.selected = combiner;
+        model.selectCombiner(combiner);
         canvas.rebuild();
         refreshEditors();
         preview(model.toPartialDag());
@@ -484,7 +484,7 @@ public final class SandboxDialog extends JDialog {
         if (sel instanceof SandboxModel.Line) return (SandboxModel.Line) sel;
         if (!model.lines.isEmpty()) {
             SandboxModel.Line first = model.lines.get(0);
-            model.selected = first;
+            model.selectLine(first, false, false);
             return first;
         }
         return null;
@@ -512,7 +512,12 @@ public final class SandboxDialog extends JDialog {
         model.lines.addAll(fresh.lines);
         model.combiners.clear();
         model.combiners.addAll(fresh.combiners);
-        model.selected = model.lines.isEmpty() ? null : model.lines.get(0);
+        if (model.lines.isEmpty()) {
+            model.selected = null;
+            model.clearLineSelection();
+        } else {
+            model.selectLine(model.lines.get(0), false, false);
+        }
         canvas.rebuild();
         refreshEditors();
         status.setText("Loaded preset: " + chosen);

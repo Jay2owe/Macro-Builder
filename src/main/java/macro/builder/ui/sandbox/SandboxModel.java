@@ -10,6 +10,7 @@ import macro.builder.image.dag.DagNode;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 
 final class SandboxModel {
@@ -17,6 +18,8 @@ final class SandboxModel {
 
     final List<Line> lines = new ArrayList<Line>();
     final List<CombinerNode> combiners = new ArrayList<CombinerNode>();
+    private final LinkedHashSet<Line> selectedLines = new LinkedHashSet<Line>();
+    private Line selectionAnchorLine;
     Object selected;
     private int nextNode = 1;
     private int nextCombiner = 1;
@@ -43,7 +46,7 @@ final class SandboxModel {
             model.lines.add(new Line("line_A"));
         }
         model.reseedCounters();
-        model.selected = model.lines.get(0);
+        model.selectLine(model.lines.get(0), false, false);
         return model;
     }
 
@@ -107,7 +110,7 @@ final class SandboxModel {
         if (lines.size() >= MAX_LINES) return;
         Line line = new Line("line_" + (char) ('A' + lines.size()));
         lines.add(line);
-        selected = line;
+        selectLine(line, false, false);
     }
 
     void addNode(Line line, FilterCatalog.Entry entry) {
@@ -120,7 +123,7 @@ final class SandboxModel {
                 entry.legacy ? entry.commandName : "",
                 entry.legacy ? entry.menuPath : "");
         line.nodes.add(node);
-        selected = node;
+        selectNode(node);
     }
 
     boolean hasLegacyNode() {
@@ -136,7 +139,7 @@ final class SandboxModel {
     void removeNode(Line line, Node node) {
         if (line == null || node == null) return;
         line.nodes.remove(node);
-        if (selected == node) selected = line;
+        if (selected == node) selectLine(line, false, false);
     }
 
     void removeLine(Line line) {
@@ -145,7 +148,9 @@ final class SandboxModel {
         for (int i = combiners.size() - 1; i >= 0; i--) {
             if (combiners.get(i).inputs.contains(line.id)) combiners.remove(i);
         }
-        selected = lines.get(0);
+        selectedLines.remove(line);
+        if (selectionAnchorLine == line) selectionAnchorLine = null;
+        selectLine(lines.get(0), false, false);
     }
 
     void addCombiner() {
@@ -153,12 +158,85 @@ final class SandboxModel {
         CombinerNode combiner = new CombinerNode("combiner_" + nextCombiner++, CombinerOp.AND,
                 Arrays.asList(lines.get(0).id, lines.get(1).id));
         combiners.add(combiner);
-        selected = combiner;
+        selectCombiner(combiner);
+    }
+
+    void addCombinerForSelectedLines() {
+        List<Line> selected = selectedLinesInVisualOrder();
+        if (selected.size() < 2) {
+            addCombiner();
+            return;
+        }
+        List<String> inputs = new ArrayList<String>();
+        for (int i = 0; i < selected.size(); i++) {
+            inputs.add(selected.get(i).id);
+        }
+        CombinerNode combiner = new CombinerNode("combiner_" + nextCombiner++, CombinerOp.AND, inputs);
+        combiners.add(combiner);
+        selectCombiner(combiner);
     }
 
     void removeCombiner(CombinerNode combiner) {
         combiners.remove(combiner);
-        if (selected == combiner) selected = lines.get(0);
+        if (selected == combiner && !lines.isEmpty()) selectLine(lines.get(0), false, false);
+    }
+
+    void selectLine(Line line, boolean ctrl, boolean shift) {
+        if (line == null) return;
+        if (shift && selectionAnchorLine != null) {
+            int a = lines.indexOf(selectionAnchorLine);
+            int b = lines.indexOf(line);
+            if (a >= 0 && b >= 0) {
+                selectedLines.clear();
+                int start = Math.min(a, b);
+                int end = Math.max(a, b);
+                for (int i = start; i <= end; i++) selectedLines.add(lines.get(i));
+            } else {
+                selectSingleLine(line);
+            }
+        } else if (ctrl) {
+            if (!selectedLines.remove(line)) selectedLines.add(line);
+            selectionAnchorLine = line;
+        } else {
+            selectSingleLine(line);
+        }
+        selected = line;
+    }
+
+    void selectNode(Node node) {
+        if (node == null) return;
+        clearLineSelection();
+        selected = node;
+    }
+
+    void selectCombiner(CombinerNode combiner) {
+        if (combiner == null) return;
+        clearLineSelection();
+        selected = combiner;
+    }
+
+    List<Line> selectedLinesInVisualOrder() {
+        List<Line> out = new ArrayList<Line>();
+        for (int i = 0; i < lines.size(); i++) {
+            Line line = lines.get(i);
+            if (selectedLines.contains(line)) out.add(line);
+        }
+        return out;
+    }
+
+    boolean isLineSelected(Line line) {
+        return selectedLines.contains(line);
+    }
+
+    private void selectSingleLine(Line line) {
+        selectedLines.clear();
+        selectedLines.add(line);
+        selectionAnchorLine = line;
+    }
+
+    void clearLineSelection() {
+        selectedLines.clear();
+        selectionAnchorLine = null;
     }
 
     private void reseedCounters() {

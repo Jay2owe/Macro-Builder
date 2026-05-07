@@ -77,6 +77,28 @@ public class DagIRRoundTripTest {
     }
 
     @Test
+    public void roundTripsCombinerWithMoreThanTwoInputs() {
+        DagIR dag = new DagIR(1,
+                Arrays.asList(
+                        new DagLine("line_A", Collections.<DagNode>emptyList()),
+                        new DagLine("line_B", Collections.<DagNode>emptyList()),
+                        new DagLine("line_C", Collections.<DagNode>emptyList())),
+                Collections.singletonList(new Combiner("combined",
+                        CombinerOp.AND,
+                        Arrays.asList("line_A", "line_B", "line_C"))),
+                "combined",
+                "native");
+
+        DagIR roundTripped = DagIRSerializer.fromJson(DagIRSerializer.toJson(dag));
+        DagIR embedded = IjmToDagLoader.loadEmbeddedDag(DagToIjmEmitter.emit(dag));
+
+        assertEquals(dag, roundTripped);
+        assertEquals(dag, embedded);
+        assertEquals(Arrays.asList("line_A", "line_B", "line_C"),
+                roundTripped.combiners.get(0).inputs);
+    }
+
+    @Test
     public void oldDagJsonDefaultsToChannelOne() {
         String json = "{\"version\":1,\"executionTier\":\"native\","
                 + "\"lines\":[{\"id\":\"line_A\",\"ops\":[]}],"

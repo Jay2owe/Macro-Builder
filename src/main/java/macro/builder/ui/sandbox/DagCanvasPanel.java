@@ -116,22 +116,26 @@ public final class DagCanvasPanel extends JPanel {
 
     private JPanel buildLinePanel(final SandboxModel.Line line) {
         JPanel panel = new JPanel(new GridBagLayout());
+        boolean lineSelected = model.isLineSelected(line);
         panel.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(model.selected == line ? new Color(70, 120, 200) : new Color(180, 180, 180), 2),
+                BorderFactory.createLineBorder(lineSelected ? new Color(45, 110, 200) : new Color(180, 180, 180),
+                        lineSelected ? 3 : 2),
                 BorderFactory.createEmptyBorder(6, 6, 6, 6)));
-        panel.setBackground(new Color(250, 250, 250));
-        panel.addMouseListener(new MouseAdapter() {
+        panel.setBackground(lineSelected ? new Color(232, 242, 255) : new Color(250, 250, 250));
+        MouseAdapter lineSelectionListener = new MouseAdapter() {
             @Override public void mouseClicked(MouseEvent e) {
-                model.selected = line;
+                model.selectLine(line, e.isControlDown(), e.isShiftDown());
                 selected();
             }
-        });
+        };
+        panel.addMouseListener(lineSelectionListener);
 
         GridBagConstraints gbc = baseGbc();
         gbc.gridy = 0;
         int branchIndex = model.lines.indexOf(line) + 1;
         JLabel title = new JLabel("Branch " + branchIndex);
         title.setFont(title.getFont().deriveFont(java.awt.Font.BOLD));
+        title.addMouseListener(lineSelectionListener);
         panel.add(title, gbc);
 
         JButton deleteLine = new JButton("x");
@@ -206,14 +210,14 @@ public final class DagCanvasPanel extends JPanel {
                 if (e.getClickCount() == 2) {
                     dragLine = null;
                     dragNode = null;
-                    model.selected = node;
+                    model.selectNode(node);
                     selected();
                     if (nodeActionHandler != null) nodeActionHandler.editNode(line, node);
                     return;
                 }
                 dragLine = line;
                 dragNode = node;
-                model.selected = node;
+                model.selectNode(node);
                 selected();
             }
 
@@ -251,7 +255,7 @@ public final class DagCanvasPanel extends JPanel {
     private boolean showNodeMenuIfRequested(MouseEvent e, SandboxModel.Line line, SandboxModel.Node node) {
         if (!e.isPopupTrigger()) return false;
         Point p = SwingUtilities.convertPoint((Component) e.getSource(), e.getPoint(), this);
-        model.selected = node;
+        model.selectNode(node);
         selected();
         buildNodeMenu(line, node).show(this, p.x, p.y);
         return true;
@@ -314,10 +318,12 @@ public final class DagCanvasPanel extends JPanel {
         }
         gbc.gridx = model.combiners.size();
         gbc.weightx = 0.0;
-        JButton addCombiner = new JButton("+ Merge branches");
+        JButton addCombiner = new JButton(model.selectedLinesInVisualOrder().size() >= 2
+                ? "+ Merge selected branches"
+                : "+ Merge branches");
         addCombiner.setEnabled(model.lines.size() >= 2);
         addCombiner.addActionListener(e -> {
-            model.addCombiner();
+            model.addCombinerForSelectedLines();
             changedAndSelected();
         });
         row.add(addCombiner, gbc);
@@ -357,7 +363,7 @@ public final class DagCanvasPanel extends JPanel {
             @Override public void mousePressed(MouseEvent e) {
                 if (showCombinerMenuIfRequested(e, combiner)) return;
                 if (!SwingUtilities.isLeftMouseButton(e)) return;
-                model.selected = combiner;
+                model.selectCombiner(combiner);
                 selected();
                 if (e.getClickCount() == 2 && combinerActionHandler != null) {
                     combinerActionHandler.editCombiner(combiner);
@@ -376,7 +382,7 @@ public final class DagCanvasPanel extends JPanel {
     private boolean showCombinerMenuIfRequested(MouseEvent e, SandboxModel.CombinerNode combiner) {
         if (!e.isPopupTrigger()) return false;
         Point p = SwingUtilities.convertPoint((Component) e.getSource(), e.getPoint(), this);
-        model.selected = combiner;
+        model.selectCombiner(combiner);
         selected();
         buildCombinerMenu(combiner).show(this, p.x, p.y);
         return true;

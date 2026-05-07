@@ -4,29 +4,31 @@ import macro.builder.image.FilterMacroParser.OpType;
 import ij.Menus;
 
 import javax.swing.BorderFactory;
-import javax.swing.DefaultListCellRenderer;
-import javax.swing.DefaultListModel;
+import javax.swing.JButton;
 import javax.swing.JLabel;
-import javax.swing.JList;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTextField;
-import javax.swing.ListSelectionModel;
 import javax.swing.SwingUtilities;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
+import java.awt.Color;
 import java.awt.GraphicsEnvironment;
 import java.awt.Menu;
 import java.awt.MenuBar;
 import java.awt.MenuItem;
 import java.awt.BorderLayout;
-import java.awt.Component;
+import java.awt.GridBagConstraints;
+import java.awt.GridBagLayout;
+import java.awt.Insets;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 public final class FilterCatalog extends JPanel {
 
@@ -34,12 +36,29 @@ public final class FilterCatalog extends JPanel {
         void onAddRequested(Entry entry);
     }
 
+    enum CatalogGroup {
+        FILTERS("Filters"),
+        THREE_D("3D"),
+        BINARY("Binary"),
+        IMAGE_TYPE("Image type"),
+        PLUGINS("Plugins"),
+        FIJI_COMMANDS("Fiji commands");
+
+        final String title;
+
+        CatalogGroup(String title) {
+            this.title = title;
+        }
+    }
+
     private static volatile List<Entry> cachedTierTwoEntries;
 
     private final JTextField search = new JTextField();
-    private final DefaultListModel<Entry> model = new DefaultListModel<Entry>();
-    private final JList<Entry> list = new JList<Entry>(model);
+    private final JPanel groupsPanel = new JPanel(new GridBagLayout());
     private final List<Entry> entries = new ArrayList<Entry>();
+    private final List<Entry> visibleEntries = new ArrayList<Entry>();
+    private final List<CatalogGroup> visibleGroups = new ArrayList<CatalogGroup>();
+    private Entry selectedEntry;
     private AddRequestListener addListener;
 
     public FilterCatalog() {
@@ -51,9 +70,9 @@ public final class FilterCatalog extends JPanel {
         setBorder(BorderFactory.createTitledBorder("Available steps"));
 
         add(search, BorderLayout.NORTH);
-        list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-        list.setCellRenderer(new Renderer());
-        add(new JScrollPane(list), BorderLayout.CENTER);
+        JScrollPane scroll = new JScrollPane(groupsPanel);
+        scroll.setBorder(BorderFactory.createEmptyBorder());
+        add(scroll, BorderLayout.CENTER);
 
         seedTierOne();
         addTierTwoEntries(tierTwoEntries);
@@ -64,23 +83,10 @@ public final class FilterCatalog extends JPanel {
             @Override public void removeUpdate(DocumentEvent e) { refresh(); }
             @Override public void changedUpdate(DocumentEvent e) { refresh(); }
         });
-
-        list.addMouseListener(new MouseAdapter() {
-            @Override public void mouseClicked(MouseEvent e) {
-                if (e.getClickCount() == 2 && SwingUtilities.isLeftMouseButton(e)
-                        && addListener != null) {
-                    int index = list.locationToIndex(e.getPoint());
-                    if (index < 0) return;
-                    Entry entry = model.getElementAt(index);
-                    if (entry == null || entry.stub) return;
-                    addListener.onAddRequested(entry);
-                }
-            }
-        });
     }
 
     public Entry getSelectedEntry() {
-        return list.getSelectedValue();
+        return selectedEntry;
     }
 
     public void setAddRequestListener(AddRequestListener listener) {
@@ -93,19 +99,50 @@ public final class FilterCatalog extends JPanel {
 
     private void refresh() {
         String q = search.getText() == null ? "" : search.getText().trim().toLowerCase(Locale.ROOT);
-        Entry selected = getSelectedEntry();
-        model.clear();
+        visibleEntries.clear();
+        visibleGroups.clear();
+        groupsPanel.removeAll();
+
+        Map<CatalogGroup, List<Entry>> grouped = new EnumMap<CatalogGroup, List<Entry>>(CatalogGroup.class);
+        CatalogGroup[] groups = CatalogGroup.values();
+        for (int i = 0; i < groups.length; i++) {
+            grouped.put(groups[i], new ArrayList<Entry>());
+        }
+
         for (int i = 0; i < entries.size(); i++) {
             Entry entry = entries.get(i);
-            if (q.length() == 0 || entry.label.toLowerCase(Locale.ROOT).contains(q)
-                    || entry.category.toLowerCase(Locale.ROOT).contains(q)
-                    || entry.menuPath.toLowerCase(Locale.ROOT).contains(q)
-                    || entry.badge().toLowerCase(Locale.ROOT).contains(q)) {
-                model.addElement(entry);
+            if (matches(entry, q)) {
+                grouped.get(groupFor(entry)).add(entry);
+                visibleEntries.add(entry);
             }
         }
-        if (selected != null) list.setSelectedValue(selected, true);
-        if (list.getSelectedIndex() < 0 && model.size() > 0) list.setSelectedIndex(0);
+
+        if (!visibleEntries.contains(selectedEntry)) {
+            selectedEntry = visibleEntries.isEmpty() ? null : visibleEntries.get(0);
+        }
+
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.gridx = 0;
+        gbc.gridy = 0;
+        gbc.weightx = 1.0;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        gbc.anchor = GridBagConstraints.NORTH;
+        gbc.insets = new Insets(0, 0, 6, 0);
+        for (int i = 0; i < groups.length; i++) {
+            CatalogGroup group = groups[i];
+            List<Entry> groupEntries = grouped.get(group);
+            if (groupEntries.isEmpty()) continue;
+            visibleGroups.add(group);
+            groupsPanel.add(buildGroupPanel(group, groupEntries), gbc);
+            gbc.gridy++;
+        }
+
+        gbc.weighty = 1.0;
+        gbc.fill = GridBagConstraints.BOTH;
+        gbc.insets = new Insets(0, 0, 0, 0);
+        groupsPanel.add(new JPanel(), gbc);
+        groupsPanel.revalidate();
+        groupsPanel.repaint();
     }
 
     private void seedTierOne() {
@@ -115,6 +152,10 @@ public final class FilterCatalog extends JPanel {
         add("Smoothing", "Minimum", OpType.MINIMUM, "radius=2 stack");
         add("Smoothing", "Maximum", OpType.MAXIMUM, "radius=2 stack");
         add("Smoothing", "Variance", OpType.VARIANCE, "radius=2 stack");
+
+        add("3D", "Gaussian Blur 3D", OpType.GAUSSIAN_BLUR_3D, "x=2 y=2 z=1");
+        add("3D", "Median 3D", OpType.MEDIAN_3D, "x=2 y=2 z=1");
+        add("3D", "Minimum 3D", OpType.MINIMUM_3D, "x=2 y=2 z=1");
 
         add("Background", "Subtract Background", OpType.SUBTRACT_BACKGROUND, "rolling=50 stack");
 
@@ -148,6 +189,120 @@ public final class FilterCatalog extends JPanel {
 
     private void add(String category, String label, OpType type, String args) {
         entries.add(Entry.fast(category, label, type, args));
+    }
+
+    static CatalogGroup groupFor(Entry entry) {
+        if (entry == null) return CatalogGroup.FILTERS;
+        if (entry.legacy && entry.menuPath.startsWith("Plugins")) return CatalogGroup.PLUGINS;
+        if (entry.legacy) return CatalogGroup.FIJI_COMMANDS;
+        switch (entry.type) {
+            case GAUSSIAN_BLUR_3D:
+            case MEDIAN_3D:
+            case MINIMUM_3D:
+                return CatalogGroup.THREE_D;
+            case DILATE:
+            case ERODE:
+            case OPEN:
+            case CLOSE_:
+            case FILL_HOLES:
+            case SKELETONIZE:
+            case AUTO_LOCAL_THRESHOLD:
+                return CatalogGroup.BINARY;
+            case CONVERT_8BIT:
+            case CONVERT_16BIT:
+            case CONVERT_32BIT:
+                return CatalogGroup.IMAGE_TYPE;
+            default:
+                return CatalogGroup.FILTERS;
+        }
+    }
+
+    private boolean matches(Entry entry, String q) {
+        if (q.length() == 0) return true;
+        CatalogGroup group = groupFor(entry);
+        return contains(entry.label, q)
+                || contains(entry.category, q)
+                || contains(entry.menuPath, q)
+                || contains(entry.commandName, q)
+                || contains(entry.badge(), q)
+                || contains(group.title, q);
+    }
+
+    private static boolean contains(String haystack, String needle) {
+        return haystack != null && haystack.toLowerCase(Locale.ROOT).contains(needle);
+    }
+
+    private JPanel buildGroupPanel(CatalogGroup group, List<Entry> groupEntries) {
+        JPanel panel = new JPanel(new GridBagLayout());
+        panel.setBorder(BorderFactory.createTitledBorder(group.title));
+
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.gridx = 0;
+        gbc.gridy = 0;
+        gbc.weightx = 1.0;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        gbc.insets = new Insets(2, 4, 2, 4);
+        for (int i = 0; i < groupEntries.size(); i++) {
+            panel.add(buildEntryRow(groupEntries.get(i)), gbc);
+            gbc.gridy++;
+        }
+        return panel;
+    }
+
+    private JPanel buildEntryRow(final Entry entry) {
+        final JPanel row = new JPanel(new BorderLayout(6, 0));
+        boolean selected = entry == selectedEntry;
+        row.setOpaque(true);
+        row.setBackground(selected ? new Color(226, 238, 252) : Color.WHITE);
+        row.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(selected ? new Color(70, 120, 200) : new Color(220, 220, 220)),
+                BorderFactory.createEmptyBorder(3, 5, 3, 3)));
+
+        String path = entry.menuPath.length() > 0 ? entry.menuPath : entry.category;
+        if (entry.stub) path = path + " - placeholder";
+        JLabel label = new JLabel("<html><b>" + html(entry.label) + " " + html(entry.badge())
+                + "</b><br><span style='font-size:9px;'>" + html(path) + "</span></html>");
+        label.setOpaque(false);
+        label.setEnabled(!entry.stub);
+        row.add(label, BorderLayout.CENTER);
+
+        JButton add = new JButton("+");
+        add.setMargin(new Insets(1, 7, 1, 7));
+        add.setEnabled(!entry.stub);
+        add.setToolTipText("Add " + entry.label + " to the selected branch");
+        add.addActionListener(e -> {
+            selectEntry(entry);
+            if (addListener != null && !entry.stub) addListener.onAddRequested(entry);
+        });
+        row.add(add, BorderLayout.EAST);
+
+        MouseAdapter selector = new MouseAdapter() {
+            @Override public void mouseClicked(MouseEvent e) {
+                if (!SwingUtilities.isLeftMouseButton(e) || entry.stub) return;
+                selectEntry(entry);
+                if (e.getClickCount() == 2 && addListener != null) {
+                    addListener.onAddRequested(entry);
+                }
+            }
+        };
+        row.addMouseListener(selector);
+        label.addMouseListener(selector);
+        return row;
+    }
+
+    private void selectEntry(Entry entry) {
+        if (entry == null || entry.stub) return;
+        selectedEntry = entry;
+        refresh();
+    }
+
+    private static String html(String text) {
+        if (text == null) return "";
+        String escaped = text.replace("&", "&amp;");
+        escaped = escaped.replace("<", "&lt;");
+        escaped = escaped.replace(">", "&gt;");
+        escaped = escaped.replace("\"", "&quot;");
+        return escaped;
     }
 
     static List<Entry> getCachedTierTwoEntries() {
@@ -249,11 +404,11 @@ public final class FilterCatalog extends JPanel {
     }
 
     List<Entry> visibleEntriesForTests() {
-        List<Entry> visible = new ArrayList<Entry>();
-        for (int i = 0; i < model.size(); i++) {
-            visible.add(model.getElementAt(i));
-        }
-        return visible;
+        return new ArrayList<Entry>(visibleEntries);
+    }
+
+    List<CatalogGroup> visibleGroupsForTests() {
+        return new ArrayList<CatalogGroup>(visibleGroups);
     }
 
     void setSearchTextForTests(String text) {
@@ -298,23 +453,4 @@ public final class FilterCatalog extends JPanel {
             return category + " - " + label;
         }
     }
-
-    private static final class Renderer extends DefaultListCellRenderer {
-        @Override
-        public Component getListCellRendererComponent(JList<?> list, Object value, int index,
-                                                      boolean isSelected, boolean cellHasFocus) {
-            JLabel label = (JLabel) super.getListCellRendererComponent(
-                    list, value, index, isSelected, cellHasFocus);
-            if (value instanceof Entry) {
-                Entry entry = (Entry) value;
-                String path = entry.menuPath.length() > 0 ? entry.menuPath : entry.category;
-                label.setText("<html><b>" + entry.label + " " + entry.badge()
-                        + "</b><br><span style='font-size:9px;'>"
-                        + path + (entry.stub ? " - placeholder" : "") + "</span></html>");
-                if (entry.stub) label.setEnabled(false);
-            }
-            return label;
-        }
-    }
 }
-

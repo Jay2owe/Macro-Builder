@@ -6,6 +6,7 @@ import java.util.List;
 
 public final class DagIR {
     public final int version;
+    public final int primaryChannel;
     public final List<DagLine> lines;
     public final List<Combiner> combiners;
     public final String output;
@@ -13,7 +14,13 @@ public final class DagIR {
 
     public DagIR(int version, List<DagLine> lines, List<Combiner> combiners,
                  String output, String executionTier) {
+        this(version, 1, lines, combiners, output, executionTier);
+    }
+
+    public DagIR(int version, int primaryChannel, List<DagLine> lines,
+                 List<Combiner> combiners, String output, String executionTier) {
         this.version = version;
+        this.primaryChannel = positiveChannel(primaryChannel, "primaryChannel");
         if (lines == null) {
             this.lines = Collections.emptyList();
         } else {
@@ -35,6 +42,7 @@ public final class DagIR {
         if (!(obj instanceof DagIR)) return false;
         DagIR other = (DagIR) obj;
         return version == other.version
+                && primaryChannel == other.primaryChannel
                 && lines.equals(other.lines)
                 && combiners.equals(other.combiners)
                 && output.equals(other.output)
@@ -44,6 +52,7 @@ public final class DagIR {
     @Override
     public int hashCode() {
         int result = version;
+        result = 31 * result + primaryChannel;
         result = 31 * result + lines.hashCode();
         result = 31 * result + combiners.hashCode();
         result = 31 * result + output.hashCode();
@@ -63,5 +72,9 @@ public final class DagIR {
         }
         return false;
     }
-}
 
+    private static int positiveChannel(int channel, String label) {
+        if (channel < 1) throw new IllegalArgumentException(label + " must be positive");
+        return channel;
+    }
+}

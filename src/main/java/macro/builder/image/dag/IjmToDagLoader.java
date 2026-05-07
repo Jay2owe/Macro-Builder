@@ -26,8 +26,9 @@ public final class IjmToDagLoader {
             if (op.type == FilterMacroParser.OpType.UNKNOWN) legacy = true;
             nodes.add(new DagNode("node_" + (i + 1), op.type, op.args));
         }
-        DagLine line = new DagLine("line_A", nodes);
+        DagLine line = new DagLine("line_A", nodes, 1);
         return new DagIR(1,
+                1,
                 Collections.singletonList(line),
                 Collections.<Combiner>emptyList(),
                 line.id,
@@ -54,4 +55,3 @@ public final class IjmToDagLoader {
         return null;
     }
 }
-

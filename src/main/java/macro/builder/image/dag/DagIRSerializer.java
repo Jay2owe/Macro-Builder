@@ -16,6 +16,8 @@ public final class DagIRSerializer {
         sb.append("{");
         appendField(sb, "version", Integer.toString(dag.version));
         sb.append(",");
+        appendField(sb, "primaryChannel", Integer.toString(dag.primaryChannel));
+        sb.append(",");
         appendField(sb, "executionTier", quote(dag.executionTier));
         sb.append(",");
         sb.append(quote("lines")).append(":[");
@@ -24,6 +26,8 @@ public final class DagIRSerializer {
             DagLine line = dag.lines.get(i);
             sb.append("{");
             appendField(sb, "id", quote(line.id));
+            sb.append(",");
+            appendField(sb, "sourceChannel", Integer.toString(line.sourceChannel));
             sb.append(",");
             sb.append(quote("ops")).append(":[");
             for (int j = 0; j < line.ops.size(); j++) {
@@ -72,6 +76,8 @@ public final class DagIRSerializer {
         Object root = new JsonParser(json).parse();
         Map<String, Object> obj = asObject(root, "root");
         int version = asInt(required(obj, "version"), "version");
+        int primaryChannel = asInt(optional(obj, "primaryChannel", Long.valueOf(1)),
+                "primaryChannel");
         String executionTier = asString(required(obj, "executionTier"), "executionTier");
         String output = asString(required(obj, "output"), "output");
 
@@ -80,6 +86,8 @@ public final class DagIRSerializer {
         for (int i = 0; i < rawLines.size(); i++) {
             Map<String, Object> rawLine = asObject(rawLines.get(i), "lines[" + i + "]");
             String id = asString(required(rawLine, "id"), "lines[" + i + "].id");
+            int sourceChannel = asInt(optional(rawLine, "sourceChannel", Long.valueOf(1)),
+                    "lines[" + i + "].sourceChannel");
             List<DagNode> ops = new ArrayList<DagNode>();
             List<Object> rawOps = asArray(required(rawLine, "ops"), "lines[" + i + "].ops");
             for (int j = 0; j < rawOps.size(); j++) {
@@ -92,7 +100,7 @@ public final class DagIRSerializer {
                 String menuPath = asString(optional(rawNode, "menuPath", ""), "node.menuPath");
                 ops.add(new DagNode(nodeId, parseOpType(typeName), args, commandName, menuPath));
             }
-            lines.add(new DagLine(id, ops));
+            lines.add(new DagLine(id, ops, sourceChannel));
         }
 
         List<Combiner> combiners = new ArrayList<Combiner>();
@@ -110,8 +118,8 @@ public final class DagIRSerializer {
             combiners.add(new Combiner(id, CombinerOp.valueOf(opName), inputs));
         }
 
-        validate(version, executionTier, output, lines, combiners);
-        return new DagIR(version, lines, combiners, output, executionTier);
+        validate(version, primaryChannel, executionTier, output, lines, combiners);
+        return new DagIR(version, primaryChannel, lines, combiners, output, executionTier);
     }
 
     private static void appendField(StringBuilder sb, String name, String value) {
@@ -147,9 +155,10 @@ public final class DagIRSerializer {
         return sb.toString();
     }
 
-    private static void validate(int version, String tier, String output,
+    private static void validate(int version, int primaryChannel, String tier, String output,
                                  List<DagLine> lines, List<Combiner> combiners) {
         if (version < 1) throw new IllegalArgumentException("Unsupported DAG version: " + version);
+        if (primaryChannel < 1) throw new IllegalArgumentException("primaryChannel must be positive");
         if (!"native".equals(tier) && !"legacy".equals(tier)) {
             throw new IllegalArgumentException("executionTier must be native or legacy");
         }
@@ -158,6 +167,7 @@ public final class DagIRSerializer {
         Map<String, Boolean> ids = new LinkedHashMap<String, Boolean>();
         for (DagLine line : lines) {
             if (line.id.length() == 0) throw new IllegalArgumentException("Line id is required");
+            if (line.sourceChannel < 1) throw new IllegalArgumentException("sourceChannel must be positive");
             if (ids.containsKey(line.id)) throw new IllegalArgumentException("Duplicate DAG id: " + line.id);
             ids.put(line.id, Boolean.TRUE);
         }
@@ -214,7 +224,16 @@ public final class DagIRSerializer {
 
     private static int asInt(Object value, String label) {
         if (!(value instanceof Number)) throw new IllegalArgumentException(label + " must be a number");
-        return ((Number) value).intValue();
+        Number number = (Number) value;
+        if (number instanceof Double || number instanceof Float) {
+            double d = number.doubleValue();
+            if (d != Math.rint(d)) throw new IllegalArgumentException(label + " must be an integer");
+        }
+        long longValue = number.longValue();
+        if (longValue < Integer.MIN_VALUE || longValue > Integer.MAX_VALUE) {
+            throw new IllegalArgumentException(label + " is out of range");
+        }
+        return (int) longValue;
     }
 
     private static final class JsonParser {
@@ -353,4 +372,3 @@ public final class DagIRSerializer {
         }
     }
 }
-

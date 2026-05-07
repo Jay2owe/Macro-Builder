@@ -1296,6 +1296,7 @@ public class Macro_Builder implements PlugIn {
                 try {
                     g2.translate(x, y);
                     g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                    g2.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE);
                     if (type == BUILD) {
                         paintBuild(g2);
                     } else if (type == RECORD) {
@@ -1311,59 +1312,101 @@ public class Macro_Builder implements PlugIn {
             }
 
             private void paintBuild(Graphics2D g2) {
-                g2.setStroke(new BasicStroke(4f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-                g2.setColor(new Color(0x4B5563));
-                g2.drawLine(12, 34, 33, 13);
-                g2.setStroke(new BasicStroke(2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-                g2.drawLine(29, 9, 38, 18);
-                g2.setColor(new Color(0x2563EB));
-                g2.fillRoundRect(9, 8, 7, 15, 4, 4);
-                g2.setColor(new Color(0x1F2937));
-                g2.setStroke(new BasicStroke(3f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-                g2.drawLine(14, 17, 34, 35);
-                g2.setStroke(new BasicStroke(2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-                g2.drawLine(34, 35, 38, 31);
+                fillBadge(g2, new Color(0xEAF2FF), new Color(0xBFD6FF));
+
+                Graphics2D hammer = (Graphics2D) g2.create();
+                hammer.rotate(Math.toRadians(-42), 21, 21);
+                hammer.setStroke(new BasicStroke(4f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                hammer.setColor(new Color(0x334155));
+                hammer.drawLine(20, 17, 20, 34);
+                hammer.setColor(new Color(0x475569));
+                hammer.fillRoundRect(10, 8, 22, 8, 4, 4);
+                hammer.setColor(new Color(0x1E3A8A));
+                hammer.fillRoundRect(17, 28, 6, 10, 4, 4);
+                hammer.dispose();
+
+                Graphics2D driver = (Graphics2D) g2.create();
+                driver.rotate(Math.toRadians(42), 21, 21);
+                driver.setStroke(new BasicStroke(3f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                driver.setColor(new Color(0xF59E0B));
+                driver.drawLine(21, 10, 21, 24);
+                driver.setColor(new Color(0x1D4ED8));
+                driver.fillRoundRect(17, 23, 8, 15, 5, 5);
+                driver.setColor(new Color(0x0F172A));
+                driver.setStroke(new BasicStroke(2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                driver.drawLine(17, 9, 25, 9);
+                driver.dispose();
             }
 
             private void paintRecord(Graphics2D g2) {
-                g2.setColor(new Color(0xFEE2E2));
-                g2.fillOval(6, 6, 32, 32);
-                g2.setColor(new Color(0xDC2626));
-                g2.fillOval(12, 12, 20, 20);
-                g2.setColor(new Color(0x991B1B));
+                fillBadge(g2, new Color(0xFFF1F2), new Color(0xFECACA));
+                g2.setColor(new Color(0xFCA5A5));
+                g2.fillOval(8, 8, 26, 26);
+                g2.setColor(new Color(0xEF4444));
+                g2.fillOval(11, 11, 20, 20);
+                g2.setColor(new Color(0xB91C1C));
                 g2.setStroke(new BasicStroke(2f));
-                g2.drawOval(12, 12, 20, 20);
+                g2.drawOval(11, 11, 20, 20);
+                g2.setColor(new Color(0xFEE2E2));
+                g2.fillOval(15, 14, 6, 6);
             }
 
             private void paintCounts(Graphics2D g2) {
-                g2.setColor(new Color(0xECFDF5));
-                g2.fillOval(5, 5, 34, 34);
+                fillBadge(g2, new Color(0xECFDF5), new Color(0xA7F3D0));
+                g2.setColor(new Color(0xFFFFFF));
+                g2.fillRoundRect(9, 9, 24, 24, 5, 5);
                 g2.setColor(new Color(0x047857));
                 g2.setStroke(new BasicStroke(2f));
-                g2.drawOval(5, 5, 34, 34);
+                g2.drawRoundRect(9, 9, 24, 24, 5, 5);
+                g2.setColor(new Color(0xD1FAE5));
+                g2.drawLine(17, 10, 17, 32);
+                g2.drawLine(25, 10, 25, 32);
+                g2.drawLine(10, 17, 32, 17);
+                g2.drawLine(10, 25, 32, 25);
                 g2.setColor(new Color(0x10B981));
-                g2.fillOval(14, 13, 6, 6);
-                g2.fillOval(25, 14, 5, 5);
-                g2.fillOval(18, 25, 5, 5);
-                g2.fillOval(29, 27, 4, 4);
+                g2.fillOval(12, 12, 5, 5);
+                g2.fillOval(23, 13, 5, 5);
+                g2.fillOval(18, 21, 5, 5);
+                g2.fillOval(27, 27, 4, 4);
                 g2.setColor(new Color(0x065F46));
-                g2.drawLine(12, 34, 34, 10);
+                g2.setStroke(new BasicStroke(2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                g2.drawLine(11, 35, 16, 38);
+                g2.drawLine(16, 38, 25, 31);
             }
 
             private void paintOpenImage(Graphics2D g2) {
+                fillBadge(g2, new Color(0xFFF7ED), new Color(0xFED7AA));
+                g2.setColor(new Color(0xFBBF24));
+                g2.fillRoundRect(7, 13, 26, 20, 5, 5);
                 g2.setColor(new Color(0xD97706));
-                g2.fillRoundRect(7, 12, 15, 9, 4, 4);
+                g2.fillRoundRect(9, 10, 13, 7, 4, 4);
                 g2.setColor(new Color(0xF59E0B));
-                g2.fillRoundRect(5, 17, 34, 21, 5, 5);
-                g2.setColor(new Color(0xFFFFFF));
-                g2.fillRect(18, 21, 15, 12);
-                g2.setColor(new Color(0x2563EB));
-                g2.fillOval(21, 23, 4, 4);
-                g2.setColor(new Color(0x16A34A));
-                g2.fillPolygon(new int[] {19, 26, 32}, new int[] {33, 27, 33}, 3);
+                g2.fillRoundRect(6, 16, 30, 19, 5, 5);
                 g2.setColor(new Color(0x92400E));
                 g2.setStroke(new BasicStroke(2f));
-                g2.drawRoundRect(5, 17, 34, 21, 5, 5);
+                g2.drawRoundRect(6, 16, 30, 19, 5, 5);
+
+                g2.setColor(new Color(0xFFFFFF));
+                g2.fillRoundRect(17, 19, 15, 13, 3, 3);
+                g2.setColor(new Color(0xCBD5E1));
+                g2.drawRoundRect(17, 19, 15, 13, 3, 3);
+                g2.setColor(new Color(0x2563EB));
+                g2.fillOval(20, 22, 4, 4);
+                g2.setColor(new Color(0x16A34A));
+                g2.fillPolygon(new int[] {18, 24, 31}, new int[] {32, 26, 32}, 3);
+                g2.setColor(new Color(0x64748B));
+                g2.setStroke(new BasicStroke(2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                g2.drawLine(33, 10, 36, 13);
+                g2.drawLine(36, 13, 36, 30);
+                g2.drawLine(33, 32, 36, 30);
+            }
+
+            private void fillBadge(Graphics2D g2, Color fill, Color border) {
+                g2.setColor(fill);
+                g2.fillRoundRect(3, 3, 36, 36, 12, 12);
+                g2.setColor(border);
+                g2.setStroke(new BasicStroke(1.5f));
+                g2.drawRoundRect(3, 3, 36, 36, 12, 12);
             }
         }
 

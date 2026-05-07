@@ -24,7 +24,7 @@ After restart, launch the plugin from `Plugins > Macro Builder > Macro Builder`.
 
 ## Basic Use
 
-1. Use `Use current Fiji image`, `Open last image/container`, or `Open Image/Container` to select the source image.
+1. Use `Use current Fiji image`, `Open Image/Container`, or `Open Last Image/Container` to select the source image.
 2. Use `Build Macro` to build a visual filter pipeline, or `Macro Recorder` to record ImageJ macro actions.
 3. Use `Load Saved Macro` to load a previously saved macro into the `Loaded Macro` panel.
 4. Use `Test Counts...` to compare threshold methods and count `2D particles` or `3D stack objects` from the processed macro output.

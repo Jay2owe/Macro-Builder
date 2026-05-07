@@ -91,7 +91,8 @@ public class Macro_Builder implements PlugIn {
                 new ArrayList<MacroHistoryEntry>();
         private final List<JButton> macroActionButtons =
                 new ArrayList<JButton>();
-        private final JButton openLastButton = new JButton("Open last image/container");
+        private final JButton openImageButton = new JButton("Open Image/Container");
+        private JButton openLastTile;
         private boolean updatingSavedMacroCombo;
 
         private ImagePlus sourceImage;
@@ -180,16 +181,16 @@ public class Macro_Builder implements PlugIn {
                     new WorkflowIcon(WorkflowIcon.RECORD), "Record filtering steps in Fiji.");
             JButton countTile = createWorkflowTile("Test Counts",
                     new WorkflowIcon(WorkflowIcon.COUNTS), "Test object counts with the current macro.");
-            JButton openImageTile = createWorkflowTile("Open Image/\nContainer",
-                    new WorkflowIcon(WorkflowIcon.OPEN_IMAGE), "Open an image, folder, or microscope container.");
+            openLastTile = createWorkflowTile("Open Last\nImage/Container",
+                    new WorkflowIcon(WorkflowIcon.OPEN_IMAGE), "Reopen the last image, folder, or container.");
             buildTile.addActionListener(e -> openSandbox());
             recordTile.addActionListener(e -> openRecorder());
             countTile.addActionListener(e -> openCountTester());
-            openImageTile.addActionListener(e -> openImageFromDisk());
+            openLastTile.addActionListener(e -> openLastImageOrContainer());
             grid.add(buildTile);
             grid.add(recordTile);
             grid.add(countTile);
-            grid.add(openImageTile);
+            grid.add(openLastTile);
             JPanel gridWrap = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
             gridWrap.add(grid);
             workflowContent.add(gridWrap, BorderLayout.CENTER);
@@ -208,11 +209,10 @@ public class Macro_Builder implements PlugIn {
             JPanel imageButtons = new JPanel(new GridLayout(0, 1, 0, 4));
             JButton current = createSecondaryButton("Use current Fiji image");
             current.addActionListener(e -> useCurrentImage(true));
-            openLastButton.addActionListener(e -> openLastImageOrContainer());
-            openLastButton.setMargin(new Insets(3, 8, 3, 8));
-            openLastButton.setEnabled(false);
+            openImageButton.addActionListener(e -> openImageFromDisk());
+            openImageButton.setMargin(new Insets(3, 8, 3, 8));
             imageButtons.add(current);
-            imageButtons.add(openLastButton);
+            imageButtons.add(openImageButton);
             imagePanel.add(imageButtons, BorderLayout.SOUTH);
             return imagePanel;
         }
@@ -1170,10 +1170,16 @@ public class Macro_Builder implements PlugIn {
 
         private void refreshLastOpenedImageControls() {
             File remembered = existingLastOpenedImagePath();
-            openLastButton.setEnabled(remembered != null);
-            openLastButton.setToolTipText(remembered == null
-                    ? "No remembered image or container is available."
-                    : remembered.getAbsolutePath());
+            if (openLastTile != null) {
+                openLastTile.setEnabled(remembered != null);
+                openLastTile.setToolTipText(remembered == null
+                        ? "No remembered image or container is available."
+                        : "Open " + remembered.getAbsolutePath());
+            }
+            openImageButton.setToolTipText(remembered == null
+                    ? "Open an image, folder, or microscope container."
+                    : "Open an image, folder, or microscope container. Last opened: "
+                    + remembered.getAbsolutePath());
         }
 
         private void setStatus(String text) {

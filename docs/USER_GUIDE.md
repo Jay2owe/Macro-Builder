@@ -14,7 +14,7 @@ Macro Builder opens as a launcher with `Selected image` controls above `Workflow
 
 - `Use current Fiji image` selects the active image window in Fiji.
 - `Open Image/Container` opens one image, folder, stack, or microscope container from disk.
-- `Open last image/container` reopens the last image or container path Macro Builder remembers, when that path still exists.
+- `Open Last Image/Container` reopens the last image or container path Macro Builder remembers, when that path still exists.
 
 Supported direct image formats include TIFF, PNG, JPEG, GIF, BMP, ICS, and IDS. For microscope containers such as CZI, LIF, ND2, OIB, OIF, LSM, ZVI, and OME files, Fiji's Bio-Formats plugin must be installed.
 

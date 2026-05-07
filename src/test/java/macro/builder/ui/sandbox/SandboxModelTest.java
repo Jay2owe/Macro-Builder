@@ -19,8 +19,8 @@ public class SandboxModelTest {
     public void partialDagPreservesLegacyCommandMetadata() {
         DagNode legacy = new DagNode("node_1", OpType.UNKNOWN, "alpha=1",
                 "Legacy Command", "Plugins > Legacy Command");
-        DagIR dag = new DagIR(1,
-                Collections.singletonList(new DagLine("line_A", Collections.singletonList(legacy))),
+        DagIR dag = new DagIR(1, 2,
+                Collections.singletonList(new DagLine("line_A", Collections.singletonList(legacy), 2)),
                 Collections.emptyList(),
                 "line_A",
                 "legacy");
@@ -31,7 +31,51 @@ public class SandboxModelTest {
 
         assertEquals("Legacy Command", partial.lines.get(0).ops.get(0).commandName);
         assertEquals("Plugins > Legacy Command", partial.lines.get(0).ops.get(0).menuPath);
+        assertEquals(2, partial.primaryChannel);
+        assertEquals(2, partial.lines.get(0).sourceChannel);
         assertEquals("legacy", partial.executionTier);
+    }
+
+    @Test
+    public void toDagPreservesPrimaryAndBranchChannels() {
+        SandboxModel model = SandboxModel.fromDag(new DagIR(1, 2,
+                Arrays.asList(
+                        new DagLine("line_A", Collections.<DagNode>emptyList(), 2),
+                        new DagLine("line_B", Collections.<DagNode>emptyList(), 3)),
+                Collections.<Combiner>emptyList(),
+                "line_A",
+                "native"));
+        model.setChannelCount(3);
+
+        DagIR dag = model.toDag();
+
+        assertEquals(2, dag.primaryChannel);
+        assertEquals(2, dag.lines.get(0).sourceChannel);
+        assertEquals(3, dag.lines.get(1).sourceChannel);
+    }
+
+    @Test
+    public void primaryChannelUpdatesFirstBranchAndClampsBranches() {
+        SandboxModel model = SandboxModel.fromDag(new DagIR(1, 1,
+                Arrays.asList(
+                        new DagLine("line_A", Collections.<DagNode>emptyList(), 1),
+                        new DagLine("line_B", Collections.<DagNode>emptyList(), 3)),
+                Collections.<Combiner>emptyList(),
+                "line_A",
+                "native"));
+        model.setChannelCount(3);
+
+        model.setPrimaryChannel(2);
+
+        assertEquals(2, model.primaryChannel);
+        assertEquals(2, model.lines.get(0).sourceChannel);
+        assertEquals(3, model.lines.get(1).sourceChannel);
+
+        model.setChannelCount(2);
+
+        assertEquals(2, model.primaryChannel);
+        assertEquals(2, model.lines.get(0).sourceChannel);
+        assertEquals(2, model.lines.get(1).sourceChannel);
     }
 
     @Test

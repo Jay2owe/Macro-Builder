@@ -21,15 +21,18 @@ final class SandboxModel {
     private final LinkedHashSet<Line> selectedLines = new LinkedHashSet<Line>();
     private Line selectionAnchorLine;
     Object selected;
+    int primaryChannel = 1;
+    int channelCount = 1;
     private int nextNode = 1;
     private int nextCombiner = 1;
 
     static SandboxModel fromDag(DagIR dag) {
         SandboxModel model = new SandboxModel();
         if (dag != null) {
+            model.primaryChannel = dag.primaryChannel;
             for (int i = 0; i < dag.lines.size(); i++) {
                 DagLine dagLine = dag.lines.get(i);
-                Line line = new Line(dagLine.id);
+                Line line = new Line(dagLine.id, dagLine.sourceChannel);
                 for (int j = 0; j < dagLine.ops.size(); j++) {
                     DagNode node = dagLine.ops.get(j);
                     line.nodes.add(new Node(node.id.length() == 0 ? "node_" + model.nextNode++ : node.id,
@@ -43,8 +46,9 @@ final class SandboxModel {
             }
         }
         if (model.lines.isEmpty()) {
-            model.lines.add(new Line("line_A"));
+            model.lines.add(new Line("line_A", model.primaryChannel));
         }
+        model.syncPrimaryLineSource();
         model.reseedCounters();
         model.selectLine(model.lines.get(0), false, false);
         return model;
@@ -59,7 +63,7 @@ final class SandboxModel {
                 Node node = line.nodes.get(j);
                 nodes.add(new DagNode(node.id, node.type, node.args, node.commandName, node.menuPath));
             }
-            dagLines.add(new DagLine(line.id, nodes));
+            dagLines.add(new DagLine(line.id, nodes, line.sourceChannel));
         }
         List<Combiner> dagCombiners = new ArrayList<Combiner>();
         for (int i = 0; i < combiners.size(); i++) {
@@ -69,7 +73,7 @@ final class SandboxModel {
         String output = dagCombiners.isEmpty()
                 ? lines.get(0).id
                 : dagCombiners.get(dagCombiners.size() - 1).id;
-        return new DagIR(1, dagLines, dagCombiners, output, executionTier(dagLines));
+        return new DagIR(1, primaryChannel, dagLines, dagCombiners, output, executionTier(dagLines));
     }
 
     DagIR toPartialDag() {
@@ -84,9 +88,9 @@ final class SandboxModel {
                     nodes.add(new DagNode(node.id, node.type, node.args, node.commandName, node.menuPath));
                     if (node == selectedNode) break;
                 }
-                partialLines.add(new DagLine(line.id, nodes));
+                partialLines.add(new DagLine(line.id, nodes, line.sourceChannel));
                 if (line.nodes.contains(selectedNode)) {
-                    return new DagIR(1, partialLines, Collections.<Combiner>emptyList(),
+                    return new DagIR(1, primaryChannel, partialLines, Collections.<Combiner>emptyList(),
                             line.id, executionTier(partialLines));
                 }
             }
@@ -99,7 +103,7 @@ final class SandboxModel {
                 CombinerNode c = combiners.get(i);
                 partialCombiners.add(new Combiner(c.id, c.op, c.inputs));
                 if (c == selectedCombiner) {
-                    return new DagIR(1, full.lines, partialCombiners, c.id, full.executionTier);
+                    return new DagIR(1, primaryChannel, full.lines, partialCombiners, c.id, full.executionTier);
                 }
             }
         }
@@ -108,8 +112,9 @@ final class SandboxModel {
 
     void addLine() {
         if (lines.size() >= MAX_LINES) return;
-        Line line = new Line("line_" + (char) ('A' + lines.size()));
+        Line line = new Line("line_" + (char) ('A' + lines.size()), primaryChannel);
         lines.add(line);
+        syncPrimaryLineSource();
         selectLine(line, false, false);
     }
 
@@ -145,6 +150,7 @@ final class SandboxModel {
     void removeLine(Line line) {
         if (line == null || lines.size() <= 1) return;
         lines.remove(line);
+        syncPrimaryLineSource();
         for (int i = combiners.size() - 1; i >= 0; i--) {
             if (combiners.get(i).inputs.contains(line.id)) combiners.remove(i);
         }
@@ -228,6 +234,30 @@ final class SandboxModel {
         return selectedLines.contains(line);
     }
 
+    void setPrimaryChannel(int channel) {
+        primaryChannel = clampChannel(channel);
+        syncPrimaryLineSource();
+    }
+
+    void setLineSourceChannel(Line line, int channel) {
+        if (line == null) return;
+        if (!lines.isEmpty() && line == lines.get(0)) {
+            line.sourceChannel = primaryChannel;
+            return;
+        }
+        line.sourceChannel = clampChannel(channel);
+    }
+
+    void setChannelCount(int count) {
+        channelCount = Math.max(1, count);
+        primaryChannel = clampChannel(primaryChannel);
+        for (int i = 0; i < lines.size(); i++) {
+            Line line = lines.get(i);
+            line.sourceChannel = clampChannel(line.sourceChannel);
+        }
+        syncPrimaryLineSource();
+    }
+
     private void selectSingleLine(Line line) {
         selectedLines.clear();
         selectedLines.add(line);
@@ -237,6 +267,18 @@ final class SandboxModel {
     void clearLineSelection() {
         selectedLines.clear();
         selectionAnchorLine = null;
+    }
+
+    private void syncPrimaryLineSource() {
+        if (!lines.isEmpty()) {
+            lines.get(0).sourceChannel = primaryChannel;
+        }
+    }
+
+    private int clampChannel(int channel) {
+        if (channel < 1) return 1;
+        if (channel > channelCount) return channelCount;
+        return channel;
     }
 
     private void reseedCounters() {
@@ -266,10 +308,16 @@ final class SandboxModel {
 
     static final class Line {
         final String id;
+        int sourceChannel;
         final List<Node> nodes = new ArrayList<Node>();
 
         Line(String id) {
+            this(id, 1);
+        }
+
+        Line(String id, int sourceChannel) {
             this.id = id == null || id.trim().isEmpty() ? "line_A" : id;
+            this.sourceChannel = sourceChannel < 1 ? 1 : sourceChannel;
         }
     }
 

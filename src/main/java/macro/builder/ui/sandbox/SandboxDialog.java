@@ -12,6 +12,7 @@ import ij.ImagePlus;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
+import javax.swing.JComboBox;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
@@ -22,6 +23,7 @@ import javax.swing.SwingUtilities;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Dimension;
+import java.awt.FlowLayout;
 import java.awt.GraphicsEnvironment;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
@@ -71,6 +73,8 @@ public final class SandboxDialog extends JDialog {
     private final JButton help = new JButton("?");
     private final JButton save = new JButton("Save");
     private final JButton cancel = new JButton("Cancel");
+    private final JComboBox<String> primaryChannelSelector = new JComboBox<String>();
+    private JPanel primaryChannelBar;
 
     private SecondaryLoop loop;
     private Result result = Result.cancel();
@@ -78,13 +82,15 @@ public final class SandboxDialog extends JDialog {
     private boolean busy = false;
     private final String initialIjm;
     private final int initialNodeCount;
+    private boolean updatingPrimaryChannelSelector;
 
     private SandboxDialog(String channelLabel, DagIR initialDag, PreviewHandler previewHandler) {
         super((java.awt.Frame) null, "Filter Builder - " + safe(channelLabel), false);
         this.model = SandboxModel.fromDag(initialDag);
+        this.previewHandler = previewHandler;
+        model.setChannelCount(channelCount(currentSourceDisplay()));
         this.initialIjm = DagToIjmEmitter.emit(model.toDag());
         this.initialNodeCount = countNodes(model);
-        this.previewHandler = previewHandler;
         this.catalog = new FilterCatalog();
         this.canvas = new DagCanvasPanel(model, new DagCanvasPanel.CatalogSupplier() {
             @Override public FilterCatalog.Entry getSelectedCatalogEntry() {
@@ -200,8 +206,12 @@ public final class SandboxDialog extends JDialog {
                 BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(180, 200, 220)),
                 BorderFactory.createEmptyBorder(6, 10, 6, 10)));
 
+        JPanel top = new JPanel(new BorderLayout(0, 0));
+        top.add(intro, BorderLayout.NORTH);
+        top.add(buildPrimaryChannelBar(), BorderLayout.SOUTH);
+
         JPanel left = new JPanel(new BorderLayout(0, 4));
-        left.add(intro, BorderLayout.NORTH);
+        left.add(top, BorderLayout.NORTH);
         left.add(canvasScroll, BorderLayout.CENTER);
 
         JSplitPane centerRight = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, left, catalogPanel);
@@ -216,6 +226,25 @@ public final class SandboxDialog extends JDialog {
         main.setBorder(BorderFactory.createEmptyBorder(8, 8, 0, 8));
         main.add(split, BorderLayout.CENTER);
         return main;
+    }
+
+    private JPanel buildPrimaryChannelBar() {
+        primaryChannelBar = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 4));
+        primaryChannelBar.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(210, 210, 210)),
+                BorderFactory.createEmptyBorder(0, 4, 0, 4)));
+        primaryChannelBar.add(new JLabel("Primary channel:"));
+        primaryChannelBar.add(primaryChannelSelector);
+        primaryChannelSelector.addActionListener(e -> {
+            if (updatingPrimaryChannelSelector) return;
+            int selected = primaryChannelSelector.getSelectedIndex();
+            if (selected < 0) return;
+            model.setPrimaryChannel(selected + 1);
+            canvas.rebuild();
+            refreshEditors();
+        });
+        refreshPrimaryChannelSelector();
+        return primaryChannelBar;
     }
 
     private JPanel buildFooter() {
@@ -289,12 +318,19 @@ public final class SandboxDialog extends JDialog {
     }
 
     private void wireButtons() {
-        previewSelected.addActionListener(e -> preview(model.toPartialDag()));
-        previewFinal.addActionListener(e -> preview(model.toDag()));
+        previewSelected.addActionListener(e -> {
+            refreshSourcePreview();
+            preview(model.toPartialDag());
+        });
+        previewFinal.addActionListener(e -> {
+            refreshSourcePreview();
+            preview(model.toDag());
+        });
         startFromPreset.addActionListener(e -> startFromPreset());
         help.setToolTipText("What do these buttons do?");
         help.addActionListener(e -> showSandboxHelp());
         save.addActionListener(e -> {
+            refreshSourcePreview();
             DagIR dag = model.toDag();
             result = new Result(dag, DagToIjmEmitter.emit(dag));
             close();
@@ -345,7 +381,35 @@ public final class SandboxDialog extends JDialog {
     }
 
     private void refreshSourcePreview() {
-        sourcePreview.setImage(previewHandler == null ? null : previewHandler.getSourceForDisplay());
+        ImagePlus display = currentSourceDisplay();
+        int before = model.channelCount;
+        model.setChannelCount(channelCount(display));
+        sourcePreview.setImage(display);
+        refreshPrimaryChannelSelector();
+        if (before != model.channelCount) canvas.rebuild();
+    }
+
+    private ImagePlus currentSourceDisplay() {
+        return previewHandler == null ? null : previewHandler.getSourceForDisplay();
+    }
+
+    private static int channelCount(ImagePlus image) {
+        return image == null ? 1 : Math.max(1, image.getNChannels());
+    }
+
+    private void refreshPrimaryChannelSelector() {
+        if (primaryChannelBar == null) return;
+        updatingPrimaryChannelSelector = true;
+        try {
+            primaryChannelSelector.removeAllItems();
+            for (int i = 1; i <= model.channelCount; i++) {
+                primaryChannelSelector.addItem("C" + i);
+            }
+            primaryChannelSelector.setSelectedIndex(Math.max(0, model.primaryChannel - 1));
+        } finally {
+            updatingPrimaryChannelSelector = false;
+        }
+        primaryChannelBar.setVisible(model.channelCount > 1);
     }
 
     private static int countNodes(SandboxModel model) {
@@ -510,16 +574,20 @@ public final class SandboxDialog extends JDialog {
         }
         DagIR dag = IjmToDagLoader.load(content);
         SandboxModel fresh = SandboxModel.fromDag(dag);
+        fresh.setChannelCount(model.channelCount);
         model.lines.clear();
         model.lines.addAll(fresh.lines);
         model.combiners.clear();
         model.combiners.addAll(fresh.combiners);
+        model.primaryChannel = fresh.primaryChannel;
+        model.setChannelCount(fresh.channelCount);
         if (model.lines.isEmpty()) {
             model.selected = null;
             model.clearLineSelection();
         } else {
             model.selectLine(model.lines.get(0), false, false);
         }
+        refreshPrimaryChannelSelector();
         canvas.rebuild();
         refreshEditors();
         status.setText("Loaded preset: " + chosen);

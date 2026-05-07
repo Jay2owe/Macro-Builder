@@ -1,9 +1,11 @@
 package macro.builder.ui.sandbox;
 
+import macro.builder.image.dag.CombinerOp;
 import macro.builder.image.dag.DagToIjmEmitter;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
+import javax.swing.JComboBox;
 import javax.swing.JLabel;
 import javax.swing.JMenuItem;
 import javax.swing.JPanel;
@@ -133,10 +135,25 @@ public final class DagCanvasPanel extends JPanel {
         GridBagConstraints gbc = baseGbc();
         gbc.gridy = 0;
         int branchIndex = model.lines.indexOf(line) + 1;
-        JLabel title = new JLabel("Branch " + branchIndex);
+        JLabel title = new JLabel("Branch " + branchIndex + " - " + sourceLabel(line));
         title.setFont(title.getFont().deriveFont(java.awt.Font.BOLD));
         title.addMouseListener(lineSelectionListener);
         panel.add(title, gbc);
+
+        if (model.channelCount > 1) {
+            final JComboBox<String> source = new JComboBox<String>(channelLabels());
+            source.setSelectedIndex(Math.max(0, line.sourceChannel - 1));
+            source.setEnabled(branchIndex != 1);
+            source.setToolTipText(branchIndex == 1
+                    ? "The first branch follows the primary channel"
+                    : "Source channel for this branch");
+            source.addActionListener(e -> {
+                model.setLineSourceChannel(line, source.getSelectedIndex() + 1);
+                changedAndSelected();
+            });
+            gbc.gridx = 1;
+            panel.add(source, gbc);
+        }
 
         JButton deleteLine = new JButton("x");
         deleteLine.setEnabled(model.lines.size() > 1);
@@ -144,11 +161,11 @@ public final class DagCanvasPanel extends JPanel {
             model.removeLine(line);
             changedAndSelected();
         });
-        gbc.gridx = 1;
+        gbc.gridx = 2;
         panel.add(deleteLine, gbc);
 
         gbc.gridx = 0;
-        gbc.gridwidth = 2;
+        gbc.gridwidth = 3;
         for (int i = 0; i < line.nodes.size(); i++) {
             gbc.gridy = i + 1;
             panel.add(buildNodeCard(line, line.nodes.get(i)), gbc);
@@ -169,6 +186,22 @@ public final class DagCanvasPanel extends JPanel {
         });
         panel.add(addNode, gbc);
         return panel;
+    }
+
+    private String sourceLabel(SandboxModel.Line line) {
+        int index = model.lines.indexOf(line);
+        if (index == 0 && line.sourceChannel == model.primaryChannel) {
+            return "Primary C" + model.primaryChannel;
+        }
+        return "C" + line.sourceChannel;
+    }
+
+    private String[] channelLabels() {
+        String[] labels = new String[Math.max(1, model.channelCount)];
+        for (int i = 0; i < labels.length; i++) {
+            labels[i] = "C" + (i + 1);
+        }
+        return labels;
     }
 
     private JPanel buildNodeCard(final SandboxModel.Line line, final SandboxModel.Node node) {
@@ -356,7 +389,7 @@ public final class DagCanvasPanel extends JPanel {
         GridBagConstraints gbc = baseGbc();
         gbc.weightx = 1.0;
         gbc.fill = GridBagConstraints.HORIZONTAL;
-        JLabel label = new JLabel("combiner: " + combiner.inputs + " " + combiner.op);
+        JLabel label = new JLabel(combinerLabel(combiner));
         card.add(label, gbc);
         JButton delete = new JButton("x");
         delete.addActionListener(e -> {
@@ -386,6 +419,31 @@ public final class DagCanvasPanel extends JPanel {
         card.addMouseListener(adapter);
         label.addMouseListener(adapter);
         return card;
+    }
+
+    private String combinerLabel(SandboxModel.CombinerNode combiner) {
+        if (combiner == null) return "Merge";
+        if (combiner.op == CombinerOp.SUBTRACT) {
+            return "Subtract: " + joinBranchInputs(combiner.inputs, " minus ");
+        }
+        return combiner.op + ": " + joinBranchInputs(combiner.inputs, ", ");
+    }
+
+    private String joinBranchInputs(java.util.List<String> inputs, String separator) {
+        if (inputs == null || inputs.isEmpty()) return "no inputs";
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < inputs.size(); i++) {
+            if (i > 0) sb.append(separator);
+            sb.append(branchLabel(inputs.get(i)));
+        }
+        return sb.toString();
+    }
+
+    private String branchLabel(String lineId) {
+        for (int i = 0; i < model.lines.size(); i++) {
+            if (model.lines.get(i).id.equals(lineId)) return "Branch " + (i + 1);
+        }
+        return lineId == null ? "unknown branch" : lineId;
     }
 
     private boolean showCombinerMenuIfRequested(MouseEvent e, SandboxModel.CombinerNode combiner) {

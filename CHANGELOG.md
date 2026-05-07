@@ -4,6 +4,7 @@
 
 - Reworked the main launcher UI with compact workflow tiles, loaded-macro controls, saved macro loading, and a shorter scrollable macro view.
 - Added automatic image/container prompting for workflows that require a selected image or stack.
+- Added multichannel hyperstack support with primary-channel selection, per-branch source channels, channel-aware preview/count execution, and saved batch settings.
 - Polished launcher icons and image/container reopening behavior.
 
 ## 0.1.2 - 2026-05-06

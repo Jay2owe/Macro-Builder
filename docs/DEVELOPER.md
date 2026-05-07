@@ -31,6 +31,14 @@ The sandbox builder split is:
 - `SandboxModel` owns the editable branch/merge state and converts it to and from `DagIR`.
 - `StepEditorDialog`, `MergeEditorDialog`, `ArgsEditorModel`, and `RecorderParameterProbe` handle inline parameter editing, merge editing, and Fiji command option capture.
 
+## Visual DAG Channel Metadata
+
+Visual builder DAGs store `primaryChannel` on `DagIR` and `sourceChannel` on each `DagLine`. Channel numbers are 1-based ImageJ channel indexes. Old DAGs without these fields must load as channel 1.
+
+Native DAG execution extracts each branch source channel into a one-channel stack before running branch steps. Combiners operate on those one-channel branch outputs and produce a single processed output image for preview, threshold shootout, and batch count workflows.
+
+The first sandbox branch follows the primary channel. Additional branches may use any available numeric source channel, such as `C2`, but the plugin does not currently store or display human-readable channel names.
+
 ## Build
 
 On Windows:

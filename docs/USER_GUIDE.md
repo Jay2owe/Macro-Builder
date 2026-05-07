@@ -37,6 +37,12 @@ Use `+ Add parallel branch` to add another branch. Ctrl-click branches to toggle
 
 `Preview to selected point` runs only up to the selected step or merge card. `Preview full filter` runs the whole builder chain. Both preview buttons update the embedded output preview and leave the selected source image unchanged.
 
+### Multichannel Hyperstacks
+
+When the selected source image has more than one channel, the visual builder shows a `Primary channel` control with numeric channel choices such as `C1`, `C2`, and `C3`. Branch 1 starts from the primary channel. Additional parallel branches can start from any available channel.
+
+Example: choose `C1` as the primary object channel, add a second branch from `C2`, filter the `C2` branch, then merge the two branches with `Subtract` so the output is `C1` minus the processed `C2` signal. `Subtract` is ordered: the first selected input is the image being subtracted from, and later selected inputs are subtracted from it.
+
 The generated macro appears in the `Loaded Macro` panel.
 
 Choose a macro from `Load Saved Macro` to load its macro text. Macro Builder also loads the matching `.dag.json` sidecar when one exists.
@@ -86,7 +92,7 @@ Click `Save as batch macro...` to save a batch count wrapper for the current mac
 
 - A wrapper `.ijm` macro that asks for an input folder and output folder, then runs `Macro Builder Batch Count`.
 - A `_Filter.ijm` macro containing the filter steps.
-- A `.settings.json` file containing the count mode, threshold mode, fixed thresholds, size filters, and output CSV name.
+- A `.settings.json` file containing the primary channel, count mode, threshold mode, fixed thresholds, size filters, and output CSV name.
 
 If you have not opened `Test Counts...` in the current session, `Save as batch macro...` uses default count settings: `2D particles`, automatic threshold methods, minimum size `0`, maximum size `Infinity`, and bright objects on a dark background.
 

@@ -1,6 +1,6 @@
 # Macro Builder
 
-Macro Builder is a standalone Fiji/ImageJ plugin for building ImageJ macro (`.ijm`) filter steps from one image or image stack. It opens from `Plugins > Macro Builder > Macro Builder` and provides a small desktop UI for selecting an open Fiji image or opening a single image, folder, stack, or microscope container from disk. After building a filter macro, users can test object counts with threshold shootouts, export count results to CSV, and save a batch count macro for ordinary image folders.
+Macro Builder is a standalone Fiji/ImageJ plugin for building ImageJ macro (`.ijm`) filter steps from one image, stack, or multichannel hyperstack. It opens from `Plugins > Macro Builder > Macro Builder` and provides a small desktop UI for selecting an open Fiji image or opening a single image, folder, stack, or microscope container from disk. For multichannel hyperstacks, choose the primary channel to process, then optionally use parallel branches from other channels to subtract, mask, or combine signals. After building a filter macro, users can test object counts with threshold shootouts, export count results to CSV, and save a batch count macro for ordinary image folders.
 
 The plugin is intentionally standalone. It does not include a bin-analysis importer, channel setup workflow, batch import workflow, or any project-specific analysis setup.
 

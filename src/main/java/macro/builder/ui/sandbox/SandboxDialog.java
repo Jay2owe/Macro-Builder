@@ -6,6 +6,7 @@ import macro.builder.image.dag.DagIR;
 import macro.builder.image.dag.DagIRSerializer;
 import macro.builder.image.dag.DagToIjmEmitter;
 import macro.builder.image.dag.IjmToDagLoader;
+import macro.builder.ui.ImagePreviewPanel;
 import ij.IJ;
 import ij.ImagePlus;
 
@@ -24,6 +25,7 @@ import java.awt.Dimension;
 import java.awt.GraphicsEnvironment;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
+import java.awt.GridLayout;
 import java.awt.Insets;
 import java.awt.SecondaryLoop;
 import java.io.File;
@@ -35,6 +37,7 @@ public final class SandboxDialog extends JDialog {
 
     public interface PreviewHandler {
         ImagePlus createSource() throws Exception;
+        ImagePlus getSourceForDisplay();
         ImagePlus showPreview(ImagePlus result, ImagePlus existingPreview) throws Exception;
         void close(ImagePlus imp);
     }
@@ -60,6 +63,8 @@ public final class SandboxDialog extends JDialog {
     private final CombinerEditorPanel combinerEditor;
     private final DagCanvasPanel canvas;
     private final FilterCatalog catalog;
+    private final ImagePreviewPanel sourcePreview = new ImagePreviewPanel("Source image");
+    private final ImagePreviewPanel outputPreview = new ImagePreviewPanel("Preview output");
     private final JLabel status = new JLabel(" ");
     private final JLabel legacyBanner = new JLabel("This chain runs through legacy execution (slower, single-threaded per image).");
     private final JButton previewSelected = new JButton("Preview up to selected step");
@@ -122,6 +127,7 @@ public final class SandboxDialog extends JDialog {
         add(buildMain(), BorderLayout.CENTER);
         add(buildFooter(), BorderLayout.SOUTH);
         wireButtons();
+        refreshSourcePreview();
         refreshEditors();
         pack();
         setLocationRelativeTo(null);
@@ -164,8 +170,16 @@ public final class SandboxDialog extends JDialog {
     }
 
     private JPanel buildMain() {
-        JPanel right = new JPanel(new BorderLayout(6, 6));
-        right.add(catalog, BorderLayout.CENTER);
+        JPanel previews = new JPanel(new GridLayout(2, 1, 0, 8));
+        previews.setPreferredSize(new Dimension(280, 1));
+        previews.setMinimumSize(new Dimension(230, 1));
+        previews.add(sourcePreview);
+        previews.add(outputPreview);
+
+        JPanel catalogPanel = new JPanel(new BorderLayout(6, 6));
+        catalogPanel.setPreferredSize(new Dimension(320, 1));
+        catalogPanel.setMinimumSize(new Dimension(260, 1));
+        catalogPanel.add(catalog, BorderLayout.CENTER);
 
         JPanel editors = new JPanel(new GridBagLayout());
         GridBagConstraints gbc = new GridBagConstraints();
@@ -180,10 +194,11 @@ public final class SandboxDialog extends JDialog {
         gbc.weighty = 1.0;
         gbc.fill = GridBagConstraints.BOTH;
         editors.add(new JPanel(), gbc);
-        right.add(editors, BorderLayout.SOUTH);
+        catalogPanel.add(editors, BorderLayout.SOUTH);
 
         JScrollPane canvasScroll = new JScrollPane(canvas);
         canvasScroll.setBorder(BorderFactory.createEmptyBorder());
+        canvasScroll.setMinimumSize(new Dimension(360, 1));
 
         JLabel intro = new JLabel("Pick a step from 'Available steps' on the right, then click '+ Add step' on the branch you want it on.");
         intro.setOpaque(true);
@@ -196,9 +211,13 @@ public final class SandboxDialog extends JDialog {
         left.add(intro, BorderLayout.NORTH);
         left.add(canvasScroll, BorderLayout.CENTER);
 
-        JSplitPane split = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, left, right);
-        split.setResizeWeight(0.72);
-        split.setDividerLocation(700);
+        JSplitPane centerRight = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, left, catalogPanel);
+        centerRight.setResizeWeight(0.70);
+        centerRight.setDividerLocation(690);
+
+        JSplitPane split = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, previews, centerRight);
+        split.setResizeWeight(0.22);
+        split.setDividerLocation(280);
 
         JPanel main = new JPanel(new BorderLayout());
         main.setBorder(BorderFactory.createEmptyBorder(8, 8, 0, 8));
@@ -329,6 +348,10 @@ public final class SandboxDialog extends JDialog {
         return choice == JOptionPane.NO_OPTION;
     }
 
+    private void refreshSourcePreview() {
+        sourcePreview.setImage(previewHandler == null ? null : previewHandler.getSourceForDisplay());
+    }
+
     private static int countNodes(SandboxModel model) {
         int total = model.combiners.size();
         for (int i = 0; i < model.lines.size(); i++) {
@@ -360,6 +383,7 @@ public final class SandboxDialog extends JDialog {
                         @Override public void run() {
                             try {
                                 previewImage = previewHandler.showPreview(previewResult, previewImage);
+                                outputPreview.setImage(previewImage);
                                 setBusy(false, "Preview complete.");
                             } catch (Exception ex) {
                                 previewHandler.close(previewResult);
@@ -509,4 +533,3 @@ public final class SandboxDialog extends JDialog {
         return value == null ? "" : value;
     }
 }
-

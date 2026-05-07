@@ -596,17 +596,28 @@ public class Macro_Builder implements PlugIn {
                     return duplicateImage(sourceImage, "Macro Builder Sandbox Source");
                 }
 
+                @Override public ImagePlus getSourceForDisplay() {
+                    return sourceImage;
+                }
+
                 @Override public ImagePlus showPreview(ImagePlus result, ImagePlus existingPreview) {
-                    closeImageQuietly(existingPreview);
-                    closeImageQuietly(sandboxPreview);
+                    if (existingPreview != null && existingPreview != result) {
+                        closeImageQuietly(existingPreview);
+                        if (existingPreview == sandboxPreview) sandboxPreview = null;
+                    }
+                    if (sandboxPreview != null && sandboxPreview != result) {
+                        closeImageQuietly(sandboxPreview);
+                        sandboxPreview = null;
+                    }
                     result.setTitle("Macro Builder Preview");
-                    result.show();
                     sandboxPreview = result;
                     return result;
                 }
 
                 @Override public void close(ImagePlus imp) {
-                    if (imp != sandboxPreview) closeImageQuietly(imp);
+                    if (imp == null) return;
+                    if (imp == sandboxPreview) sandboxPreview = null;
+                    closeImageQuietly(imp);
                 }
             };
         }

@@ -122,7 +122,8 @@ public class Macro_Builder implements PlugIn {
 
         void open() {
             dialog.pack();
-            dialog.setSize(new Dimension(980, 560));
+            Dimension packed = dialog.getSize();
+            dialog.setSize(new Dimension(980, packed.height));
             dialog.setLocationRelativeTo(null);
             dialog.setVisible(true);
         }

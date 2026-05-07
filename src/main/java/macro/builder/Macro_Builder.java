@@ -72,7 +72,7 @@ public class Macro_Builder implements PlugIn {
     private static final class SessionDialog {
         private static final int TILE_GRID_GAP = 8;
         private static final Dimension TILE_SIZE = new Dimension(104, 112);
-        private static final int TILE_ICON_SIZE = 54;
+        private static final int TILE_ICON_SIZE = 64;
         private static final int LEFT_COLUMN_WIDTH = 230;
         private static final int RIGHT_COLUMN_WIDTH = 200;
         private static final int MACRO_ACTION_BUTTON_HEIGHT = 30;
@@ -1379,10 +1379,6 @@ public class Macro_Builder implements PlugIn {
                 g2.fillOval(23, 13, 5, 5);
                 g2.fillOval(18, 21, 5, 5);
                 g2.fillOval(27, 27, 4, 4);
-                g2.setColor(new Color(0x065F46));
-                g2.setStroke(new BasicStroke(2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-                g2.drawLine(11, 35, 16, 38);
-                g2.drawLine(16, 38, 25, 31);
             }
 
             private void paintOpenImage(Graphics2D g2) {

@@ -57,6 +57,19 @@ public final class FilterExecutor {
     /** Minimum slice count before parallel execution kicks in. */
     private static final int SLICE_PARALLEL_THRESHOLD = 4;
 
+    public interface Progress {
+        void setIndeterminate(String message);
+        void setProgress(int completedSteps, int totalSteps, String message);
+    }
+
+    private static final Progress NO_PROGRESS = new Progress() {
+        @Override public void setIndeterminate(String message) {
+        }
+
+        @Override public void setProgress(int completedSteps, int totalSteps, String message) {
+        }
+    };
+
     private FilterExecutor() {}
 
     // ── Legacy macro-based execution (NOT thread-safe) ──
@@ -66,7 +79,7 @@ public final class FilterExecutor {
         try {
             String content = new String(java.nio.file.Files.readAllBytes(ijmFile.toPath()),
                     java.nio.charset.StandardCharsets.UTF_8);
-            Boolean dagResult = runEmbeddedDagIfPresent(imp, content);
+            Boolean dagResult = runEmbeddedDagIfPresent(imp, content, NO_PROGRESS);
             if (dagResult != null) return;
         } catch (Exception e) {
             IJ.log("WARNING: could not inspect IJM file for embedded Sandbox DAG: " + e.getMessage());
@@ -81,7 +94,7 @@ public final class FilterExecutor {
 
     public static void runMacroString(final ImagePlus imp, final String macroContent) {
         if (imp == null || macroContent == null || macroContent.isEmpty()) return;
-        Boolean dagResult = runEmbeddedDagIfPresent(imp, macroContent);
+        Boolean dagResult = runEmbeddedDagIfPresent(imp, macroContent, NO_PROGRESS);
         if (dagResult != null) return;
         runLegacyMacroSandboxed(imp, new Runnable() {
             @Override
@@ -244,37 +257,52 @@ public final class FilterExecutor {
      *         if it fell back to the locked legacy macro path
      */
     public static boolean runThreadSafe(ImagePlus imp, String macroContent) {
+        return runThreadSafe(imp, macroContent, null);
+    }
+
+    public static boolean runThreadSafe(ImagePlus imp, String macroContent, Progress progress) {
+        Progress callback = progress == null ? NO_PROGRESS : progress;
         if (imp == null || macroContent == null || macroContent.isEmpty()) return true;
 
-        Boolean dagResult = runEmbeddedDagIfPresent(imp, macroContent);
+        callback.setIndeterminate("Inspecting macro...");
+        Boolean dagResult = runEmbeddedDagIfPresent(imp, macroContent, callback);
         if (dagResult != null) return dagResult.booleanValue();
 
         // Known compound filters — run under window lock
         if (PunctaResolveFilter.matches(macroContent)) {
+            callback.setIndeterminate("Running Puncta Resolve filter...");
             WindowManagerLock.LOCK.lock();
             try {
                 PunctaResolveFilter.apply(imp, macroContent);
             } finally {
                 WindowManagerLock.LOCK.unlock();
             }
+            callback.setProgress(1, 1, "Puncta Resolve filter complete.");
             return true;
         }
         if (DiffuseObjectFilter.matches(macroContent)) {
+            callback.setIndeterminate("Running diffuse object filter...");
             WindowManagerLock.LOCK.lock();
             try {
                 DiffuseObjectFilter.apply(imp, macroContent);
             } finally {
                 WindowManagerLock.LOCK.unlock();
             }
+            callback.setProgress(1, 1, "Diffuse object filter complete.");
             return true;
         }
 
         List<FilterMacroParser.Op> ops = FilterMacroParser.parseString(macroContent);
+        if (ops.isEmpty()) {
+            callback.setProgress(1, 1, "No macro steps to run.");
+            return true;
+        }
 
         // Check if all ops can be executed natively
         for (FilterMacroParser.Op op : ops) {
             if (op.type == FilterMacroParser.OpType.UNKNOWN) {
                 // Fall back to locked macro execution
+                callback.setIndeterminate("Running legacy macro...");
                 WindowManagerLock.LOCK.lock();
                 try {
                     runMacroString(imp, macroContent);
@@ -284,21 +312,30 @@ public final class FilterExecutor {
                     closeWindowSafely(imp);
                     WindowManagerLock.LOCK.unlock();
                 }
+                callback.setProgress(1, 1, "Legacy macro complete.");
                 return false;
             }
         }
 
         // Execute all ops natively
-        for (FilterMacroParser.Op op : ops) {
+        int total = ops.size();
+        callback.setProgress(0, total, "Running macro...");
+        for (int i = 0; i < total; i++) {
+            FilterMacroParser.Op op = ops.get(i);
+            String label = opLabel(op);
+            callback.setProgress(i, total, "Step " + (i + 1) + "/" + total + ": " + label);
             executeOpOnStack(imp, op);
+            callback.setProgress(i + 1, total, "Completed " + (i + 1) + "/" + total + ": " + label);
         }
         return true;
     }
 
-    private static Boolean runEmbeddedDagIfPresent(ImagePlus imp, String macroContent) {
+    private static Boolean runEmbeddedDagIfPresent(ImagePlus imp, String macroContent, Progress progress) {
         DagIR dag = IjmToDagLoader.loadEmbeddedDag(macroContent);
         if (dag == null) return null;
+        Progress callback = progress == null ? NO_PROGRESS : progress;
         try {
+            callback.setIndeterminate("Running visual builder macro...");
             ImagePlus result;
             if ("legacy".equals(dag.executionTier)) {
                 ImagePlus source = cloneStackPerSlice(imp, "dag_source");
@@ -312,11 +349,29 @@ public final class FilterExecutor {
                 result = runDagThreadSafe(imp, dag);
             }
             applyResultInPlace(imp, result);
+            callback.setProgress(1, 1, "Visual builder macro complete.");
             return Boolean.valueOf(!"legacy".equals(dag.executionTier));
         } catch (DagRejectedException e) {
             IJ.log("WARNING: embedded Sandbox DAG failed, falling back to macro execution: " + e.getMessage());
             return null;
         }
+    }
+
+    private static String opLabel(FilterMacroParser.Op op) {
+        if (op == null || op.type == null) return "macro step";
+        String name = op.type.name().toLowerCase(java.util.Locale.ROOT).replace('_', ' ');
+        StringBuilder label = new StringBuilder();
+        boolean upperNext = true;
+        for (int i = 0; i < name.length(); i++) {
+            char ch = name.charAt(i);
+            if (upperNext && ch >= 'a' && ch <= 'z') {
+                label.append((char) (ch - 32));
+            } else {
+                label.append(ch);
+            }
+            upperNext = ch == ' ';
+        }
+        return label.toString();
     }
 
     private static void applyResultInPlace(ImagePlus target, ImagePlus result) {
@@ -1102,5 +1157,3 @@ public final class FilterExecutor {
         }
     }
 }
-
-

@@ -24,11 +24,11 @@ After restart, launch the plugin from `Plugins > Macro Builder > Macro Builder`.
 
 ## Basic Use
 
-1. Open an image or stack in Fiji, or click `Open image/container...` inside Macro Builder.
-2. Use `Build step-by-step` to build a visual filter pipeline, or `Record in Fiji` to record ImageJ macro actions.
-3. Use `Preview macro` or `Run macro on selected image` to test the generated macro on a duplicate image.
-4. Use `Test counts...` to compare threshold methods and count `2D particles` or `3D stack objects` from the processed macro output.
-5. Use `Save macro...` to export the generated `.ijm` file, or `Save batch macro...` to export a wrapper macro and settings for batch count runs.
+1. Use `Use current Fiji image`, `Open last image/container`, or `Open Image/Container` to select the source image.
+2. Use `Build Macro` to build a visual filter pipeline, or `Macro Recorder` to record ImageJ macro actions.
+3. Use `Load Saved Macro` to load a previously saved macro into the `Loaded Macro` panel.
+4. Use `Test Counts...` to compare threshold methods and count `2D particles` or `3D stack objects` from the processed macro output.
+5. Use `Save as batch macro...` to export a wrapper macro and settings for batch count runs.
 
 For microscope container formats such as `.czi`, `.lif`, `.nd2`, `.oib`, `.oif`, `.lsm`, or `.zvi`, Fiji's Bio-Formats plugin must be available. Standard Fiji installations normally include it. Container files and folder-style datasets open through the Bio-Formats chooser, so you can select the specific series/image to use before running Macro Builder.
 

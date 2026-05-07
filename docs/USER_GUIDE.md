@@ -8,7 +8,7 @@ After installation, restart Fiji and choose:
 Plugins > Macro Builder > Macro Builder
 ```
 
-Macro Builder opens as a launcher with `Workflows` on the left, the selected image and macro text in the center, and `Last macro` actions on the right. It can use the currently active Fiji image, or it can open one image, folder, image stack, or microscope container from disk.
+Macro Builder opens as a launcher with `Selected image` controls above `Workflows` on the left, the loaded macro text in the center, and `Loaded Macro` actions on the right. It can use the currently active Fiji image, or it can open one image, folder, image stack, or microscope container from disk.
 
 ## Select An Image
 
@@ -27,16 +27,15 @@ Use one of the two `Workflows` authoring tiles:
 - `Build Macro`: opens the visual filter builder.
 - `Macro Recorder`: opens a recorder workflow for capturing ImageJ macro commands.
 
-The generated macro appears in the `Last built macro` panel.
+The generated macro appears in the `Loaded Macro` panel.
 
-Macros exported with `Save macro...` are added to the `Saved macro` dropdown. Choose a saved macro from that dropdown to load its macro text, and Macro Builder also loads the matching `.dag.json` sidecar when one exists.
+Choose a macro from `Load Saved Macro` to load its macro text. Macro Builder also loads the matching `.dag.json` sidecar when one exists.
 
 ## Test A Macro
 
-The `Last macro` column is enabled after a macro has been built, recorded, or loaded.
+The `Loaded Macro` column is enabled after a macro has been built, recorded, or loaded.
 
 - `Run as batch...` currently shows a message directing you to `Test Counts...` > `Run batch...`.
-- `Save macro...` exports the current macro as an ImageJ macro file.
 - `Save as batch macro...` exports a batch count wrapper for the current macro and latest count settings.
 - `Edit Macro...` opens the visual builder using the current macro.
 - `Create Macro Variations...` is a placeholder and is not implemented yet.
@@ -71,11 +70,7 @@ In the `Test Counts` dialog, click `Run batch...` to run the same macro and coun
 
 Batch count testing supports ordinary image files such as TIFF, PNG, JPEG, GIF, BMP, ICS, and IDS. Bio-Formats containers are skipped in batch mode; open those files individually first if you need the Bio-Formats series chooser.
 
-## Save A Macro
-
-Click `Save macro...` in the `Last macro` column to export an ImageJ macro file (`.ijm`). Saved macros are added to the `Saved macro` dropdown for later loading.
-
-When a macro was created with the visual builder, Macro Builder also writes a `.dag.json` sidecar next to the macro. The sidecar stores the visual graph so the macro can be reloaded and edited more accurately later.
+## Save A Batch Macro
 
 Click `Save as batch macro...` to save a batch count wrapper for the current macro and latest count settings. Macro Builder writes three files:
 

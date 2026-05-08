@@ -1,6 +1,7 @@
 package macro.builder.ui.sandbox;
 
 import macro.builder.image.dag.DagToIjmEmitter;
+import ij.measure.Calibration;
 
 import javax.swing.BorderFactory;
 import javax.swing.JLabel;
@@ -20,12 +21,14 @@ final class StepEditorDialog {
 
     private final JPanel panel = new JPanel(new GridBagLayout());
     private final List<ArgsEditorModel.Token> tokens;
+    private final ArgsEditorModel.UnitContext units;
     private final List<FieldBinding> fields = new ArrayList<FieldBinding>();
     private final JTextArea rawOptions;
 
-    private StepEditorDialog(SandboxModel.Node node) {
+    private StepEditorDialog(SandboxModel.Node node, Calibration calibration) {
         String args = node == null ? "" : node.args;
         this.tokens = ArgsEditorModel.parse(args);
+        this.units = ArgsEditorModel.UnitContext.fromCalibration(calibration);
 
         String command = displayName(node);
         addLabel(command, 0, 0, 2, true);
@@ -33,19 +36,22 @@ final class StepEditorDialog {
         if (ArgsEditorModel.hasEditableParameters(tokens)) {
             this.rawOptions = null;
             int row = 1;
-            if (ArgsEditorModel.hasPixelParameters(tokens)) {
+            if (ArgsEditorModel.hasPhysicalParameters(tokens, units)) {
+                addHint("Spatial values use source calibration and are saved as pixels for stable execution.", 0, row++, 2);
+            } else if (ArgsEditorModel.hasPixelParameters(tokens, units)) {
                 addHint("Spatial values use pixels, not microns.", 0, row++, 2);
             }
             for (int i = 0; i < tokens.size(); i++) {
                 ArgsEditorModel.Token token = tokens.get(i);
                 if (!token.isEditable()) continue;
-                JLabel label = addLabel(ArgsEditorModel.displayLabel(token), 0, row, 1, false);
-                String hint = ArgsEditorModel.unitHint(token);
+                JLabel label = addLabel(ArgsEditorModel.displayLabel(token, units), 0, row, 1, false);
+                String hint = ArgsEditorModel.unitHint(token, units);
                 if (hint.length() > 0) label.setToolTipText(hint);
-                JTextField field = new JTextField(token.value(),
-                        Math.max(8, Math.min(24, token.value().length() + 4)));
+                String displayValue = ArgsEditorModel.displayValue(token, units);
+                JTextField field = new JTextField(displayValue,
+                        Math.max(8, Math.min(24, displayValue.length() + 4)));
                 if (hint.length() > 0) field.setToolTipText(hint);
-                fields.add(new FieldBinding(token, field));
+                fields.add(new FieldBinding(token, field, units));
                 addField(field, 1, row);
                 row++;
             }
@@ -61,9 +67,13 @@ final class StepEditorDialog {
     }
 
     static boolean show(Component parent, SandboxModel.Node node) {
+        return show(parent, node, null);
+    }
+
+    static boolean show(Component parent, SandboxModel.Node node, Calibration calibration) {
         if (node == null) return false;
         String original = node.args == null ? "" : node.args;
-        StepEditorDialog editor = new StepEditorDialog(node);
+        StepEditorDialog editor = new StepEditorDialog(node, calibration);
         int result = JOptionPane.showConfirmDialog(parent,
                 editor.panel,
                 "Edit parameters",
@@ -134,14 +144,17 @@ final class StepEditorDialog {
     private static final class FieldBinding {
         private final ArgsEditorModel.Token token;
         private final JTextField field;
+        private final ArgsEditorModel.UnitContext units;
 
-        FieldBinding(ArgsEditorModel.Token token, JTextField field) {
+        FieldBinding(ArgsEditorModel.Token token, JTextField field,
+                     ArgsEditorModel.UnitContext units) {
             this.token = token;
             this.field = field;
+            this.units = units == null ? ArgsEditorModel.UnitContext.none() : units;
         }
 
         void apply() {
-            token.setValue(field.getText().trim());
+            token.setValue(ArgsEditorModel.storageValue(token, field.getText(), units));
         }
     }
 }

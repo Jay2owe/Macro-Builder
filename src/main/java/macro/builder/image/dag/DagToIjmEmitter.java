@@ -20,6 +20,10 @@ public final class DagToIjmEmitter {
         sb.append("// ").append(DagIRSerializer.toJson(dag)).append('\n');
         sb.append("source_id = getImageID();\n");
         sb.append("getDimensions(width, height, channels, slices, frames);\n");
+        sb.append("getPixelSize(mb_unit, mb_pixel_width, mb_pixel_height, mb_voxel_depth);\n");
+        sb.append("function mb_restore_calibration() {\n");
+        sb.append("    setVoxelSize(mb_pixel_width, mb_pixel_height, mb_voxel_depth, mb_unit);\n");
+        sb.append("}\n");
 
         for (int i = 0; i < dag.lines.size(); i++) {
             DagLine line = dag.lines.get(i);
@@ -30,10 +34,12 @@ public final class DagToIjmEmitter {
                     .append(" slices=1-\" + slices + \" frames=1-\" + frames;\n");
             sb.append("run(\"Duplicate...\", \"title=").append(escapeMacroArg(lineId))
                     .append(" duplicate \" + line_range);\n");
+            sb.append("mb_restore_calibration();\n");
             sb.append(lineId).append(" = getImageID();\n");
             for (int j = 0; j < line.ops.size(); j++) {
                 DagNode node = line.ops.get(j);
                 sb.append(emitRun(node));
+                sb.append("mb_restore_calibration();\n");
             }
         }
 
@@ -51,6 +57,7 @@ public final class DagToIjmEmitter {
                     outTitle = macroIdentifier(combiner.id + "_" + j);
                 }
                 sb.append("rename(\"").append(escapeMacroArg(outTitle)).append("\");\n");
+                sb.append("mb_restore_calibration();\n");
                 currentTitle = outTitle;
             }
             sb.append(macroIdentifier(combiner.id)).append(" = getImageID();\n");
@@ -59,6 +66,7 @@ public final class DagToIjmEmitter {
         String output = macroTitleForId(dag.output);
         if (output.length() > 0) {
             sb.append("selectImage(\"").append(escapeMacroArg(output)).append("\");\n");
+            sb.append("mb_restore_calibration();\n");
         }
         return sb.toString();
     }

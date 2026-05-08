@@ -9,6 +9,7 @@ import macro.builder.image.dag.IjmToDagLoader;
 import macro.builder.ui.ImagePreviewPanel;
 import ij.IJ;
 import ij.ImagePlus;
+import ij.measure.Calibration;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
@@ -29,6 +30,7 @@ import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.GridLayout;
 import java.awt.Insets;
+import java.awt.Rectangle;
 import java.awt.SecondaryLoop;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
@@ -36,6 +38,10 @@ import java.nio.file.Files;
 import java.util.concurrent.CountDownLatch;
 
 public final class SandboxDialog extends JDialog {
+
+    private static final double PREVIEW_COLUMN_FRACTION = 0.37;
+    private static final double AVAILABLE_STEPS_FRACTION = 0.10;
+    private static final double INITIAL_DESKTOP_FRACTION = 0.88;
 
     public interface PreviewHandler {
         ImagePlus createSource() throws Exception;
@@ -69,20 +75,25 @@ public final class SandboxDialog extends JDialog {
     private final JLabel legacyBanner = new JLabel("This chain runs through legacy execution (slower, single-threaded per image).");
     private final JButton previewSelected = new JButton("Preview to selected point");
     private final JButton previewFinal = new JButton("Preview full filter");
+    private final JButton largePreview = new JButton("Large view");
     private final JButton startFromPreset = new JButton("Start from a preset...");
     private final JButton help = new JButton("?");
     private final JButton save = new JButton("Save");
     private final JButton cancel = new JButton("Cancel");
     private final JComboBox<String> primaryChannelSelector = new JComboBox<String>();
+    private JSplitPane mainSplit;
+    private JSplitPane centerRightSplit;
     private JPanel primaryChannelBar;
 
     private SecondaryLoop loop;
     private Result result = Result.cancel();
     private ImagePlus previewImage;
+    private LargePreviewDialog largePreviewDialog;
     private boolean busy = false;
     private final String initialIjm;
     private final int initialNodeCount;
     private boolean updatingPrimaryChannelSelector;
+    private boolean syncingPreviewSlices;
 
     private SandboxDialog(String channelLabel, DagIR initialDag, PreviewHandler previewHandler) {
         super((java.awt.Frame) null, "Filter Builder - " + safe(channelLabel), false);
@@ -121,6 +132,11 @@ public final class SandboxDialog extends JDialog {
         }, new Runnable() {
             @Override public void run() { refreshEditors(); }
         });
+        canvas.setUnitContextProvider(new DagCanvasPanel.UnitContextProvider() {
+            @Override public ArgsEditorModel.UnitContext getUnitContext() {
+                return currentUnitContext();
+            }
+        });
         catalog.setAddRequestListener(new FilterCatalog.AddRequestListener() {
             @Override public void onAddRequested(FilterCatalog.Entry entry) {
                 SandboxModel.Line target = resolveTargetLine();
@@ -140,11 +156,18 @@ public final class SandboxDialog extends JDialog {
         add(legacyBanner, BorderLayout.NORTH);
         add(buildMain(), BorderLayout.CENTER);
         add(buildFooter(), BorderLayout.SOUTH);
+        wirePreviewSliceSync();
         wireButtons();
         refreshSourcePreview();
         refreshEditors();
         pack();
-        setLocationRelativeTo(null);
+        sizeNearDesktop();
+        applyInitialSplitLocations();
+        SwingUtilities.invokeLater(new Runnable() {
+            @Override public void run() {
+                applyInitialSplitLocations();
+            }
+        });
     }
 
     public static Result show(String channelLabel, File binFolder, int channelIndex,
@@ -185,19 +208,17 @@ public final class SandboxDialog extends JDialog {
 
     private JPanel buildMain() {
         JPanel previews = new JPanel(new GridLayout(2, 1, 0, 8));
-        previews.setPreferredSize(new Dimension(280, 1));
-        previews.setMinimumSize(new Dimension(230, 1));
+        previews.setMinimumSize(new Dimension(0, 1));
         previews.add(sourcePreview);
         previews.add(outputPreview);
 
         JPanel catalogPanel = new JPanel(new BorderLayout(6, 6));
-        catalogPanel.setPreferredSize(new Dimension(320, 1));
-        catalogPanel.setMinimumSize(new Dimension(260, 1));
+        catalogPanel.setMinimumSize(new Dimension(0, 1));
         catalogPanel.add(catalog, BorderLayout.CENTER);
 
         JScrollPane canvasScroll = new JScrollPane(canvas);
         canvasScroll.setBorder(BorderFactory.createEmptyBorder());
-        canvasScroll.setMinimumSize(new Dimension(360, 1));
+        canvasScroll.setMinimumSize(new Dimension(0, 1));
 
         JLabel intro = new JLabel("Use the + buttons or double-click grouped steps, or pick a step and click '+ Add step' on a branch.");
         intro.setOpaque(true);
@@ -214,17 +235,15 @@ public final class SandboxDialog extends JDialog {
         left.add(top, BorderLayout.NORTH);
         left.add(canvasScroll, BorderLayout.CENTER);
 
-        JSplitPane centerRight = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, left, catalogPanel);
-        centerRight.setResizeWeight(0.70);
-        centerRight.setDividerLocation(690);
+        centerRightSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, left, catalogPanel);
+        centerRightSplit.setResizeWeight(centerRightLeftFraction());
 
-        JSplitPane split = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, previews, centerRight);
-        split.setResizeWeight(0.22);
-        split.setDividerLocation(280);
+        mainSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, previews, centerRightSplit);
+        mainSplit.setResizeWeight(PREVIEW_COLUMN_FRACTION);
 
         JPanel main = new JPanel(new BorderLayout());
         main.setBorder(BorderFactory.createEmptyBorder(8, 8, 0, 8));
-        main.add(split, BorderLayout.CENTER);
+        main.add(mainSplit, BorderLayout.CENTER);
         return main;
     }
 
@@ -253,11 +272,13 @@ public final class SandboxDialog extends JDialog {
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.insets = new Insets(0, 0, 0, 6);
 
-        // Left cluster: start-from-preset, then help.
+        // Left cluster: large preview, start-from-preset, then help.
         gbc.gridx = 0;
         gbc.gridy = 0;
         gbc.weightx = 0.0;
         gbc.fill = GridBagConstraints.NONE;
+        footer.add(largePreview, gbc);
+        gbc.gridx++;
         footer.add(startFromPreset, gbc);
         gbc.gridx++;
         footer.add(help, gbc);
@@ -291,7 +312,8 @@ public final class SandboxDialog extends JDialog {
                 + "<b>+</b> buttons or double-click rows in the grouped step boxes to add "
                 + "commands to the selected branch, or pick a step and click <b>+ Add step</b> on a "
                 + "branch. Double-click or right-click a step in <b>Your filter</b> "
-                + "to edit its settings. Spatial settings are labelled as pixels, not microns. "
+                + "to edit its settings. Calibrated spatial settings are entered in source-image units "
+                + "and saved as pixels so later metadata loss does not change filtering. "
                 + "Ctrl-click or Shift-click branches, then use "
                 + "<b>Merge selected branches</b>. Double-click or right-click a merge "
                 + "card to edit how branches combine."
@@ -306,6 +328,9 @@ public final class SandboxDialog extends JDialog {
                 + "<br><br>"
                 + "<b>Preview full filter</b><br>"
                 + "Runs the entire chain on the sample image and updates the embedded output preview."
+                + "<br><br>"
+                + "<b>Large view</b><br>"
+                + "Opens the source and preview images side by side in a larger window with synced Z sliders."
                 + "<br><br>"
                 + "<b>Save</b><br>"
                 + "Saves the current chain as the channel's custom filter."
@@ -327,6 +352,8 @@ public final class SandboxDialog extends JDialog {
             refreshSourcePreview();
             preview(model.toDag());
         });
+        largePreview.setToolTipText("Open source and preview images side by side in a larger window");
+        largePreview.addActionListener(e -> showLargePreview());
         startFromPreset.addActionListener(e -> startFromPreset());
         help.setToolTipText("What do these buttons do?");
         help.addActionListener(e -> showSandboxHelp());
@@ -355,11 +382,62 @@ public final class SandboxDialog extends JDialog {
                 close();
             }
             @Override public void windowClosed(java.awt.event.WindowEvent e) {
+                if (largePreviewDialog != null) {
+                    largePreviewDialog.dispose();
+                    largePreviewDialog = null;
+                }
                 if (previewHandler != null) previewHandler.close(previewImage);
                 done.countDown();
                 if (loop != null) loop.exit();
             }
         });
+    }
+
+    private void wirePreviewSliceSync() {
+        sourcePreview.setZSliceChangeListener(new ImagePreviewPanel.ZSliceChangeListener() {
+            @Override public void zSliceChanged(ImagePreviewPanel source, int zSlice) {
+                syncPreviewSlices(zSlice);
+            }
+        });
+        outputPreview.setZSliceChangeListener(new ImagePreviewPanel.ZSliceChangeListener() {
+            @Override public void zSliceChanged(ImagePreviewPanel source, int zSlice) {
+                syncPreviewSlices(zSlice);
+            }
+        });
+    }
+
+    private void syncPreviewSlices(int zSlice) {
+        if (syncingPreviewSlices) return;
+        syncingPreviewSlices = true;
+        try {
+            sourcePreview.setCurrentZ(zSlice);
+            outputPreview.setCurrentZ(zSlice);
+            if (largePreviewDialog != null && largePreviewDialog.isDisplayable()) {
+                largePreviewDialog.setCurrentZ(zSlice);
+            }
+        } finally {
+            syncingPreviewSlices = false;
+        }
+    }
+
+    private void showLargePreview() {
+        refreshSourcePreview();
+        if (largePreviewDialog == null || !largePreviewDialog.isDisplayable()) {
+            largePreviewDialog = new LargePreviewDialog(this);
+            largePreviewDialog.setSliceListener(new LargePreviewDialog.SliceListener() {
+                @Override public void zSliceChanged(int zSlice) {
+                    syncPreviewSlices(zSlice);
+                }
+            });
+        }
+        refreshLargePreviewIfOpen();
+        largePreviewDialog.setVisible(true);
+        largePreviewDialog.toFront();
+    }
+
+    private void refreshLargePreviewIfOpen() {
+        if (largePreviewDialog == null || !largePreviewDialog.isDisplayable()) return;
+        largePreviewDialog.setImages(currentSourceDisplay(), previewImage, sourcePreview.getCurrentZ());
     }
 
     private boolean confirmDiscardIfDirty() {
@@ -386,6 +464,8 @@ public final class SandboxDialog extends JDialog {
         int before = model.channelCount;
         model.setChannelCount(channelCount(display));
         sourcePreview.setImage(display);
+        syncPreviewSlices(sourcePreview.getCurrentZ());
+        refreshLargePreviewIfOpen();
         refreshPrimaryChannelSelector();
         if (before != model.channelCount) canvas.rebuild();
     }
@@ -445,6 +525,8 @@ public final class SandboxDialog extends JDialog {
                             try {
                                 previewImage = previewHandler.showPreview(previewResult, previewImage);
                                 outputPreview.setImage(previewImage);
+                                syncPreviewSlices(sourcePreview.getCurrentZ());
+                                refreshLargePreviewIfOpen();
                                 setBusy(false, "Preview complete.");
                             } catch (Exception ex) {
                                 previewHandler.close(previewResult);
@@ -504,7 +586,7 @@ public final class SandboxDialog extends JDialog {
     private void editNodeInline(SandboxModel.Node node) {
         if (node == null) return;
         model.selectNode(node);
-        if (StepEditorDialog.show(this, node)) {
+        if (StepEditorDialog.show(this, node, currentSourceCalibration())) {
             canvas.rebuild();
             refreshEditors();
         } else {
@@ -602,7 +684,8 @@ public final class SandboxDialog extends JDialog {
             return false;
         }
         if (!entry.legacy) {
-            editNewNodeParameters(model.addNode(line, entry));
+            String args = ArgsEditorModel.storageArgsForDisplayDefaults(entry.defaultArgs, currentUnitContext());
+            editNewNodeParameters(model.addNode(line, entry, args));
             return true;
         }
         if (previewHandler == null) {
@@ -633,8 +716,18 @@ public final class SandboxDialog extends JDialog {
     private void editNewNodeParameters(SandboxModel.Node node) {
         if (node == null) return;
         model.selectNode(node);
-        StepEditorDialog.show(this, node);
+        StepEditorDialog.show(this, node, currentSourceCalibration());
         refreshEditors();
+    }
+
+    private Calibration currentSourceCalibration() {
+        ImagePlus display = currentSourceDisplay();
+        if (display == null || display.getCalibration() == null) return null;
+        return display.getCalibration().copy();
+    }
+
+    private ArgsEditorModel.UnitContext currentUnitContext() {
+        return ArgsEditorModel.UnitContext.fromCalibration(currentSourceCalibration());
     }
 
     private void close() {
@@ -643,5 +736,35 @@ public final class SandboxDialog extends JDialog {
 
     private static String safe(String value) {
         return value == null ? "" : value;
+    }
+
+    private void sizeNearDesktop() {
+        Rectangle bounds = GraphicsEnvironment.getLocalGraphicsEnvironment().getMaximumWindowBounds();
+        Dimension minimum = getMinimumSize();
+        int targetWidth = (int) Math.round(bounds.width * INITIAL_DESKTOP_FRACTION);
+        int targetHeight = (int) Math.round(bounds.height * INITIAL_DESKTOP_FRACTION);
+        int width = Math.min(bounds.width, Math.max(minimum.width, targetWidth));
+        int height = Math.min(bounds.height, Math.max(minimum.height, targetHeight));
+        int x = bounds.x + Math.max(0, (bounds.width - width) / 2);
+        int y = bounds.y + Math.max(0, (bounds.height - height) / 2);
+        setBounds(x, y, width, height);
+    }
+
+    private void applyInitialSplitLocations() {
+        if (mainSplit != null) {
+            mainSplit.setDividerLocation(PREVIEW_COLUMN_FRACTION);
+        }
+        if (centerRightSplit != null) {
+            centerRightSplit.setDividerLocation(centerRightLeftFraction());
+        }
+    }
+
+    private static double centerRightLeftFraction() {
+        double centerRightFraction = 1.0 - PREVIEW_COLUMN_FRACTION;
+        if (centerRightFraction <= 0.0) return 0.85;
+        double availableStepsWithinCenterRight = AVAILABLE_STEPS_FRACTION / centerRightFraction;
+        if (availableStepsWithinCenterRight < 0.05) availableStepsWithinCenterRight = 0.05;
+        if (availableStepsWithinCenterRight > 0.40) availableStepsWithinCenterRight = 0.40;
+        return 1.0 - availableStepsWithinCenterRight;
     }
 }

@@ -23,6 +23,10 @@ import java.awt.RenderingHints;
 
 public final class ImagePreviewPanel extends JPanel {
 
+    public interface ZSliceChangeListener {
+        void zSliceChanged(ImagePreviewPanel source, int zSlice);
+    }
+
     private final JLabel titleLabel = new JLabel("No image selected.");
     private final JLabel detailLabel = new JLabel(" ");
     private final JLabel sliceLabel = new JLabel(" ");
@@ -34,6 +38,7 @@ public final class ImagePreviewPanel extends JPanel {
     private int currentZ = 1;
     private int currentT = 1;
     private boolean updatingSlider;
+    private ZSliceChangeListener zSliceChangeListener;
 
     public ImagePreviewPanel(String title) {
         super(new BorderLayout(6, 6));
@@ -67,19 +72,56 @@ public final class ImagePreviewPanel extends JPanel {
                 currentZ = zSlider.getValue();
                 updateSliceLabel();
                 canvas.repaint();
+                if (zSliceChangeListener != null) {
+                    zSliceChangeListener.zSliceChanged(ImagePreviewPanel.this, currentZ);
+                }
             }
         });
         refresh();
     }
 
+    public void setZSliceChangeListener(ZSliceChangeListener listener) {
+        this.zSliceChangeListener = listener;
+    }
+
     public void setImage(ImagePlus image) {
+        boolean hadImage = this.image != null
+                && this.image.getStack() != null
+                && this.image.getStackSize() > 0;
+        int previousZ = currentZ;
         this.image = image;
         if (image != null) {
             currentC = clamp(image.getC(), 1, Math.max(1, image.getNChannels()));
-            currentZ = clamp(image.getZ(), 1, Math.max(1, image.getNSlices()));
+            currentZ = clamp(hadImage ? previousZ : image.getZ(), 1, Math.max(1, image.getNSlices()));
             currentT = clamp(image.getT(), 1, Math.max(1, image.getNFrames()));
         }
         refresh();
+    }
+
+    public int getCurrentZ() {
+        return currentZ;
+    }
+
+    public int getSliceCount() {
+        if (image == null || image.getStack() == null || image.getStackSize() <= 0) return 1;
+        return Math.max(1, image.getNSlices());
+    }
+
+    public void setCurrentZ(int zSlice) {
+        if (image == null || image.getStack() == null || image.getStackSize() <= 0) {
+            currentZ = 1;
+            setSliderState(1, 1, 1);
+            zSlider.setEnabled(false);
+            updateSliceLabel();
+            canvas.repaint();
+            return;
+        }
+        int slices = Math.max(1, image.getNSlices());
+        currentZ = clamp(zSlice, 1, slices);
+        setSliderState(1, slices, currentZ);
+        zSlider.setEnabled(slices > 1);
+        updateSliceLabel();
+        canvas.repaint();
     }
 
     public void refresh() {

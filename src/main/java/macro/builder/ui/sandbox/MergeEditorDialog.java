@@ -304,7 +304,7 @@ final class MergeEditorDialog {
             if (line.id.equals(lineId)) {
                 String base = "Branch " + (i + 1);
                 if (line.name == null || line.name.trim().length() == 0) return base;
-                return base + ": " + line.name.trim();
+                return line.name.trim();
             }
         }
         return lineId == null ? "unknown branch" : lineId;

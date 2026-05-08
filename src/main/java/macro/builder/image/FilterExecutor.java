@@ -4,6 +4,7 @@ import ij.IJ;
 import ij.ImagePlus;
 import ij.ImageStack;
 import ij.Prefs;
+import ij.measure.Calibration;
 import ij.measure.ResultsTable;
 import ij.plugin.ContrastEnhancer;
 import ij.plugin.GaussianBlur3D;
@@ -132,6 +133,7 @@ public final class FilterExecutor {
     private static void runLegacyMacroSandboxed(ImagePlus imp, Runnable macroCall, Set<String> keepTitles) {
         String originalTitle = imp == null ? null : imp.getTitle();
         int originalId = imp == null ? 0 : imp.getID();
+        Calibration originalCalibration = copyCalibration(imp);
         Set<Integer> beforeIds = snapshotWindowIds();
         boolean attachedTemp = false;
         try {
@@ -150,6 +152,7 @@ public final class FilterExecutor {
             }
             macroCall.run();
             if (imp != null) adoptResultIfOriginalClosed(imp, originalTitle, originalId);
+            restoreCalibrationIfLost(imp, originalCalibration);
         } finally {
             if (attachedTemp) {
                 ij.WindowManager.setTempCurrentImage(null);
@@ -237,9 +240,7 @@ public final class FilterExecutor {
 
         imp.setStack(result.getStack());
         imp.setDimensions(result.getNChannels(), result.getNSlices(), result.getNFrames());
-        if (result.getCalibration() != null) {
-            imp.setCalibration(result.getCalibration());
-        }
+        if (result.getCalibration() != null) imp.setCalibration(result.getCalibration());
         result.changes = false;
         result.close();
     }
@@ -376,13 +377,41 @@ public final class FilterExecutor {
 
     private static void applyResultInPlace(ImagePlus target, ImagePlus result) {
         if (target == null || result == null || result.getStackSize() == 0) return;
+        Calibration originalCalibration = copyCalibration(target);
         target.setStack(result.getStack());
         target.setDimensions(result.getNChannels(), result.getNSlices(), result.getNFrames());
         if (result.getCalibration() != null) {
             target.setCalibration(result.getCalibration().copy());
         }
+        restoreCalibrationIfLost(target, originalCalibration);
         target.setDisplayRange(result.getDisplayRangeMin(), result.getDisplayRangeMax());
         target.updateAndDraw();
+    }
+
+    private static Calibration copyCalibration(ImagePlus image) {
+        return image == null || image.getCalibration() == null
+                ? null
+                : image.getCalibration().copy();
+    }
+
+    private static void restoreCalibrationIfLost(ImagePlus image, Calibration original) {
+        if (image == null || !isCalibrated(original)) return;
+        if (!isCalibrated(image.getCalibration())) {
+            image.setCalibration(original.copy());
+        }
+    }
+
+    private static boolean isCalibrated(Calibration calibration) {
+        if (calibration == null) return false;
+        String unit = calibration.getUnit();
+        String lower = unit == null ? "" : unit.trim().toLowerCase(java.util.Locale.ROOT);
+        if ("".equals(lower) || "pixel".equals(lower) || "pixels".equals(lower)) return false;
+        return positiveCalibrationValue(calibration.pixelWidth)
+                && positiveCalibrationValue(calibration.pixelHeight);
+    }
+
+    private static boolean positiveCalibrationValue(double value) {
+        return !Double.isNaN(value) && !Double.isInfinite(value) && value > 0.0;
     }
 
     /**

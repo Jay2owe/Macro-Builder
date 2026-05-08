@@ -55,6 +55,57 @@ public class ImagePreviewPanelTest {
         assertFalse(slider.isEnabled());
     }
 
+    @Test
+    public void setCurrentZUpdatesSliderAndClampsToStackDepth() {
+        ImagePreviewPanel panel = new ImagePreviewPanel("Source image");
+        panel.setImage(stackImage("Sample Stack", 5, 4, 3));
+
+        panel.setCurrentZ(2);
+
+        assertEquals(2, panel.getCurrentZ());
+        assertEquals(3, panel.getSliceCount());
+        assertEquals(2, findSlider(panel).getValue());
+        assertTrue(labelTexts(panel).contains("2/3"));
+
+        panel.setCurrentZ(99);
+
+        assertEquals(3, panel.getCurrentZ());
+        assertEquals(3, findSlider(panel).getValue());
+        assertTrue(labelTexts(panel).contains("3/3"));
+    }
+
+    @Test
+    public void zSliceListenerFiresForSliderChangesButNotSyncedUpdates() {
+        ImagePreviewPanel panel = new ImagePreviewPanel("Source image");
+        panel.setImage(stackImage("Sample Stack", 5, 4, 3));
+        final List<Integer> changes = new ArrayList<Integer>();
+        panel.setZSliceChangeListener(new ImagePreviewPanel.ZSliceChangeListener() {
+            @Override public void zSliceChanged(ImagePreviewPanel source, int zSlice) {
+                changes.add(Integer.valueOf(zSlice));
+            }
+        });
+
+        findSlider(panel).setValue(2);
+        panel.setCurrentZ(3);
+
+        assertEquals(1, changes.size());
+        assertEquals(Integer.valueOf(2), changes.get(0));
+        assertEquals(3, panel.getCurrentZ());
+    }
+
+    @Test
+    public void setImagePreservesCurrentZWhenPreviewRefreshes() {
+        ImagePreviewPanel panel = new ImagePreviewPanel("Source image");
+        panel.setImage(stackImage("Sample Stack", 5, 4, 4));
+        panel.setCurrentZ(3);
+
+        panel.setImage(stackImage("Refreshed Stack", 5, 4, 4));
+
+        assertEquals(3, panel.getCurrentZ());
+        assertEquals(3, findSlider(panel).getValue());
+        assertTrue(labelTexts(panel).contains("3/4"));
+    }
+
     private static ImagePlus stackImage(String title, int width, int height, int slices) {
         ImageStack stack = new ImageStack(width, height);
         for (int i = 0; i < slices; i++) {

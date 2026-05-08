@@ -20,7 +20,7 @@ If you start a workflow that needs an image or stack before selecting one, Macro
 
 Supported direct image formats include TIFF, PNG, JPEG, GIF, BMP, ICS, and IDS. For microscope containers such as CZI, LIF, ND2, OIB, OIF, LSM, ZVI, and OME files, Fiji's Bio-Formats plugin must be installed.
 
-When you select a container file or folder-style dataset, Macro Builder opens Fiji's Bio-Formats chooser. Use that dialog to select the series/image inside the container. If Bio-Formats opens more than one image, Macro Builder asks which imported image it should use as the selected source.
+When you select a container file or folder-style dataset, Macro Builder reads the Bio-Formats series list and asks which series to open before loading the image.
 
 ## Build A Macro
 
@@ -31,11 +31,11 @@ Use one of the two `Workflows` authoring tiles:
 
 The visual builder has source and output previews on the left, the sandbox in the middle, and grouped `Available steps` on the right. Step groups include filters, 3D commands, binary commands, image type conversions, plugins, and other Fiji commands.
 
-Use a row `+` button in `Available steps`, or double-click a command row, to add that command to the selected branch. You can also select a command row, then click `+ Add step` on a branch. New steps open their parameter editor automatically. Spatial parameters such as `sigma`, `radius`, `rolling`, `x`, `y`, and `z` are labelled as pixels, not microns. Double-click or right-click a step in the sandbox to edit its parameters later. Right-click a step to preview to that point or delete it.
+Use a row `+` button in `Available steps`, or double-click a command row, to add that command to the selected branch. You can also select a command row, then click `+ Add step` on a branch. New steps open their parameter editor automatically. When the source image has calibrated micron metadata, spatial parameters such as `sigma`, `radius`, `rolling`, `x`, `y`, and `z` are shown in microns in both the editor and `Your filter`. Defaults are interpreted in the visible unit, then converted to pixels when saved. If calibration is missing, or X/Y pixel sizes differ for a single-radius filter, the editor shows pixels. Saved filters store pixel values so later metadata loss during macro execution does not change the filtering. Double-click or right-click a step in the sandbox to edit its parameters later. Right-click a step to preview to that point or delete it.
 
-Use `+ Add parallel branch` to add another branch. Each branch has an optional `Name` field, which is saved with the filter and shown in merge labels. Ctrl-click branches to toggle them, or Shift-click to select a range, then click `Merge selected branches`. Double-click or right-click a merge card to change its operation, inputs, and input order.
+Use `+ Add parallel branch` to add another branch. Double-click a branch title or empty branch area to rename it; the saved name replaces labels such as `Branch 1` and is shown in merge labels. Ctrl-click branches to toggle them, or Shift-click to select a range, then click `Merge selected branches`. Double-click or right-click a merge card to change its operation, inputs, and input order.
 
-`Preview to selected point` runs only up to the selected step or merge card. `Preview full filter` runs the whole builder chain. Both preview buttons update the embedded output preview and leave the selected source image unchanged.
+`Preview to selected point` runs only up to the selected step or merge card. `Preview full filter` runs the whole builder chain. Both preview buttons update the embedded output preview and leave the selected source image unchanged. `Large view` opens the source and output previews in a larger side-by-side window. The source and output preview Z sliders stay synced in both the embedded view and the large view, so moving to a slice in either preview shows the matching slice in the other preview.
 
 ### Multichannel Hyperstacks
 

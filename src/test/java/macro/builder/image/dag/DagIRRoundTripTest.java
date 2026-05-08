@@ -90,6 +90,8 @@ public class DagIRRoundTripTest {
         String ijm = DagToIjmEmitter.emit(dag);
 
         assertTrue(ijm.indexOf("getDimensions(width, height, channels, slices, frames);") >= 0);
+        assertTrue(ijm.indexOf("getPixelSize(mb_unit, mb_pixel_width, mb_pixel_height, mb_voxel_depth);") >= 0);
+        assertTrue(ijm.indexOf("function mb_restore_calibration()") >= 0);
         assertTrue(ijm.indexOf("line_range = \"channels=1-1 slices=1-\" + slices + \" frames=1-\" + frames;") >= 0);
         assertTrue(ijm.indexOf("line_range = \"channels=2-2 slices=1-\" + slices + \" frames=1-\" + frames;") >= 0);
         assertTrue(ijm.indexOf("run(\"Duplicate...\", \"title=line_B duplicate \" + line_range);") >= 0);
@@ -118,6 +120,7 @@ public class DagIRRoundTripTest {
                 roundTripped.combiners.get(0).inputs);
         assertTrue(ijm.indexOf("imageCalculator(\"AND create\", \"line_A\", \"line_B\");") >= 0);
         assertTrue(ijm.indexOf("rename(\"combined_1\");") >= 0);
+        assertTrue(ijm.indexOf("setVoxelSize(mb_pixel_width, mb_pixel_height, mb_voxel_depth, mb_unit);") >= 0);
         assertTrue(ijm.indexOf("imageCalculator(\"AND create\", \"combined_1\", \"line_C\");") >= 0);
         assertTrue(ijm.indexOf("rename(\"combined\");") >= 0);
         assertTrue(ijm.indexOf("selectImage(\"combined\");") >= 0);

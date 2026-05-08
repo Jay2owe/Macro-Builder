@@ -8,20 +8,16 @@ import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JLabel;
 import javax.swing.JMenuItem;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
-import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
-import javax.swing.event.DocumentEvent;
-import javax.swing.event.DocumentListener;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
 import java.awt.Point;
-import java.awt.event.FocusAdapter;
-import java.awt.event.FocusEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 
@@ -45,6 +41,10 @@ public final class DagCanvasPanel extends JPanel {
         void previewToCombiner(SandboxModel.CombinerNode combiner);
     }
 
+    interface UnitContextProvider {
+        ArgsEditorModel.UnitContext getUnitContext();
+    }
+
     private final SandboxModel model;
     private final CatalogSupplier catalogSupplier;
     private final NodeCreator nodeCreator;
@@ -52,6 +52,7 @@ public final class DagCanvasPanel extends JPanel {
     private final CombinerActionHandler combinerActionHandler;
     private final Runnable selectionCallback;
     private final Runnable changeCallback;
+    private UnitContextProvider unitContextProvider;
 
     private SandboxModel.Line dragLine;
     private SandboxModel.Node dragNode;
@@ -86,11 +87,16 @@ public final class DagCanvasPanel extends JPanel {
         rebuild();
     }
 
+    void setUnitContextProvider(UnitContextProvider unitContextProvider) {
+        this.unitContextProvider = unitContextProvider;
+        rebuild();
+    }
+
     public void rebuild() {
         removeAll();
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.gridy = 0;
-        gbc.insets = new Insets(6, 6, 6, 6);
+        gbc.insets = new Insets(0, 4, 4, 4);
         gbc.anchor = GridBagConstraints.NORTH;
         for (int i = 0; i < model.lines.size(); i++) {
             gbc.gridx = i;
@@ -115,7 +121,19 @@ public final class DagCanvasPanel extends JPanel {
         gbc.gridwidth = model.lines.size() + 1;
         gbc.weightx = 1.0;
         gbc.fill = GridBagConstraints.HORIZONTAL;
+        gbc.insets = new Insets(4, 4, 4, 4);
         add(buildCombinerRow(), gbc);
+
+        gbc.gridx = 0;
+        gbc.gridy = 2;
+        gbc.gridwidth = model.lines.size() + 1;
+        gbc.weightx = 1.0;
+        gbc.weighty = 1.0;
+        gbc.fill = GridBagConstraints.BOTH;
+        gbc.insets = new Insets(0, 0, 0, 0);
+        JPanel bottomFiller = new JPanel();
+        bottomFiller.setOpaque(false);
+        add(bottomFiller, gbc);
 
         revalidate();
         repaint();
@@ -127,11 +145,17 @@ public final class DagCanvasPanel extends JPanel {
         panel.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(lineSelected ? new Color(45, 110, 200) : new Color(180, 180, 180),
                         lineSelected ? 3 : 2),
-                BorderFactory.createEmptyBorder(6, 6, 6, 6)));
+                BorderFactory.createEmptyBorder(4, 4, 4, 4)));
         panel.setBackground(lineSelected ? new Color(232, 242, 255) : new Color(250, 250, 250));
+        panel.setToolTipText("Double-click the branch title or empty branch area to rename it.");
         MouseAdapter lineSelectionListener = new MouseAdapter() {
             @Override public void mouseClicked(MouseEvent e) {
+                if (!SwingUtilities.isLeftMouseButton(e)) return;
                 model.selectLine(line, e.isControlDown(), e.isShiftDown());
+                if (e.getClickCount() == 2) {
+                    renameLine(line);
+                    return;
+                }
                 selected();
             }
         };
@@ -140,8 +164,9 @@ public final class DagCanvasPanel extends JPanel {
         GridBagConstraints gbc = baseGbc();
         gbc.gridy = 0;
         int branchIndex = model.lines.indexOf(line) + 1;
-        JLabel title = new JLabel("Branch " + branchIndex + " - " + sourceLabel(line));
+        JLabel title = new JLabel(displayBranchName(line, branchIndex) + " - " + sourceLabel(line));
         title.setFont(title.getFont().deriveFont(java.awt.Font.BOLD));
+        title.setToolTipText("Double-click to rename this branch.");
         title.addMouseListener(lineSelectionListener);
         panel.add(title, gbc);
 
@@ -169,17 +194,16 @@ public final class DagCanvasPanel extends JPanel {
         gbc.gridx = 2;
         panel.add(deleteLine, gbc);
 
-        gbc.gridx = 0;
-        gbc.gridwidth = 3;
-        gbc.gridy = 1;
-        panel.add(buildNameField(line), gbc);
-
         for (int i = 0; i < line.nodes.size(); i++) {
-            gbc.gridy = i + 2;
+            gbc.gridx = 0;
+            gbc.gridwidth = 3;
+            gbc.gridy = i + 1;
             panel.add(buildNodeCard(line, line.nodes.get(i)), gbc);
         }
 
-        gbc.gridy = line.nodes.size() + 2;
+        gbc.gridx = 0;
+        gbc.gridwidth = 3;
+        gbc.gridy = line.nodes.size() + 1;
         JButton addNode = new JButton("+ Add step");
         addNode.addActionListener(e -> {
             FilterCatalog.Entry entry = catalogSupplier == null ? null : catalogSupplier.getSelectedCatalogEntry();
@@ -192,38 +216,18 @@ public final class DagCanvasPanel extends JPanel {
             if (added) changedAndSelected();
         });
         panel.add(addNode, gbc);
-        return panel;
-    }
 
-    private JPanel buildNameField(final SandboxModel.Line line) {
-        JPanel row = new JPanel(new GridBagLayout());
-        row.setOpaque(false);
-        GridBagConstraints gbc = baseGbc();
-        gbc.insets = new Insets(0, 0, 0, 4);
-        row.add(new JLabel("Name:"), gbc);
-
-        final JTextField name = new JTextField(line.name, 10);
-        name.setToolTipText("Optional branch name");
-        name.getDocument().addDocumentListener(new DocumentListener() {
-            @Override public void insertUpdate(DocumentEvent e) { update(); }
-            @Override public void removeUpdate(DocumentEvent e) { update(); }
-            @Override public void changedUpdate(DocumentEvent e) { update(); }
-            private void update() {
-                model.setLineName(line, name.getText());
-                if (changeCallback != null) changeCallback.run();
-            }
-        });
-        name.addActionListener(e -> rebuild());
-        name.addFocusListener(new FocusAdapter() {
-            @Override public void focusLost(FocusEvent e) {
-                rebuild();
-            }
-        });
-        gbc.gridx = 1;
+        gbc.gridx = 0;
+        gbc.gridwidth = 3;
+        gbc.gridy = line.nodes.size() + 2;
         gbc.weightx = 1.0;
-        gbc.fill = GridBagConstraints.HORIZONTAL;
-        row.add(name, gbc);
-        return row;
+        gbc.weighty = 1.0;
+        gbc.fill = GridBagConstraints.BOTH;
+        gbc.insets = new Insets(0, 0, 0, 0);
+        JPanel bottomFiller = new JPanel();
+        bottomFiller.setOpaque(false);
+        panel.add(bottomFiller, gbc);
+        return panel;
     }
 
     private String sourceLabel(SandboxModel.Line line) {
@@ -242,6 +246,28 @@ public final class DagCanvasPanel extends JPanel {
         return labels;
     }
 
+    private void renameLine(SandboxModel.Line line) {
+        if (line == null) {
+            selected();
+            return;
+        }
+        int index = model.lines.indexOf(line) + 1;
+        String current = displayBranchName(line, index);
+        String value = (String) JOptionPane.showInputDialog(this,
+                "Branch name:",
+                "Rename branch",
+                JOptionPane.PLAIN_MESSAGE,
+                null,
+                null,
+                current);
+        if (value == null) {
+            selected();
+            return;
+        }
+        model.setLineName(line, value);
+        changedAndSelected();
+    }
+
     private JPanel buildNodeCard(final SandboxModel.Line line, final SandboxModel.Node node) {
         JPanel card = new JPanel(new GridBagLayout());
         card.setBorder(BorderFactory.createCompoundBorder(
@@ -252,8 +278,9 @@ public final class DagCanvasPanel extends JPanel {
         String command = node.commandName.length() > 0 ? node.commandName : DagToIjmEmitter.commandFor(node.type);
         String displayName = command == null ? node.type.name() : command;
         String badge = node.isLegacy() ? " [legacy]" : "";
+        String argsDisplay = ArgsEditorModel.displayArgs(node.args, unitContext());
         JLabel label = new JLabel("<html><b>" + html(displayName + badge)
-                + "</b><br><span style='font-size:9px;'>" + html(node.args) + "</span></html>");
+                + "</b><br><span style='font-size:9px;'>" + html(argsDisplay) + "</span></html>");
         String tooltip = node.isLegacy()
                 ? "Runs through Fiji's slower single-image path"
                 : "Runs through the fast batched path";
@@ -486,9 +513,13 @@ public final class DagCanvasPanel extends JPanel {
     }
 
     private String branchLabel(SandboxModel.Line line, int index) {
-        String base = "Branch " + (index + 1);
-        if (line == null || line.name == null || line.name.trim().length() == 0) return base;
-        return base + ": " + line.name.trim();
+        return displayBranchName(line, index + 1);
+    }
+
+    private static String displayBranchName(SandboxModel.Line line, int oneBasedIndex) {
+        String fallback = "Branch " + Math.max(1, oneBasedIndex);
+        if (line == null || line.name == null || line.name.trim().length() == 0) return fallback;
+        return line.name.trim();
     }
 
     private boolean showCombinerMenuIfRequested(MouseEvent e, SandboxModel.CombinerNode combiner) {
@@ -529,6 +560,12 @@ public final class DagCanvasPanel extends JPanel {
         gbc.insets = new Insets(3, 3, 3, 3);
         gbc.anchor = GridBagConstraints.WEST;
         return gbc;
+    }
+
+    private ArgsEditorModel.UnitContext unitContext() {
+        if (unitContextProvider == null) return ArgsEditorModel.UnitContext.none();
+        ArgsEditorModel.UnitContext context = unitContextProvider.getUnitContext();
+        return context == null ? ArgsEditorModel.UnitContext.none() : context;
     }
 
     private void selected() {

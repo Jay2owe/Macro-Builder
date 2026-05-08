@@ -465,13 +465,18 @@ public class Macro_Builder implements PlugIn {
         }
 
         private void openSandbox() {
+            openSandbox(false);
+        }
+
+        private void openSandbox(boolean openVariationsOnStart) {
             if (!ensureImage()) return;
             if (!stateDir.exists() && !stateDir.mkdirs()) {
                 IJ.showMessage("Macro Builder", "Could not create state folder:\n" + stateDir.getAbsolutePath());
                 return;
             }
             SandboxDialog.Result result = SandboxDialog.show(
-                    "Standalone image", stateDir, 0, lastMacro, createSandboxPreviewHandler());
+                    "Standalone image", stateDir, 0, lastMacro, createSandboxPreviewHandler(),
+                    openVariationsOnStart);
             if (result == null || result.dag == null || result.ijmFallback == null) return;
             lastDag = result.dag;
             selectedPrimaryChannel = Math.max(1, result.dag.primaryChannel);
@@ -610,7 +615,7 @@ public class Macro_Builder implements PlugIn {
 
         private void createMacroVariationsPlaceholder() {
             if (!ensureMacroLoaded()) return;
-            IJ.showMessage("Macro Builder", "Create Macro Variations is not implemented yet.");
+            openSandbox(true);
         }
 
         private boolean ensureMacroLoaded() {

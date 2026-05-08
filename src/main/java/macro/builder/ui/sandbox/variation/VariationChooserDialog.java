@@ -36,10 +36,10 @@ import java.awt.BorderLayout;
 import java.awt.CardLayout;
 import java.awt.Color;
 import java.awt.FlowLayout;
-import java.awt.Frame;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
+import java.awt.Window;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.util.ArrayList;
@@ -96,7 +96,7 @@ public final class VariationChooserDialog extends JDialog {
 
     private boolean updatingNodeCombo;
 
-    public VariationChooserDialog(Frame owner,
+    public VariationChooserDialog(Window owner,
                                   DagIR baseline,
                                   ImagePlus source,
                                   Consumer<List<VariantResult>> resultCallback) {

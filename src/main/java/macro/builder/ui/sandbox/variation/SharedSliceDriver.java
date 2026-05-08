@@ -37,6 +37,17 @@ public final class SharedSliceDriver {
         repainters.add(onRepaint);
     }
 
+    public void unregister(ImagePlus imp) {
+        if (imp == null) return;
+        for (int i = slaves.size() - 1; i >= 0; i--) {
+            if (slaves.get(i) == imp) {
+                slaves.remove(i);
+                repainters.remove(i);
+            }
+        }
+        currentSlice = Math.max(1, Math.min(currentSlice, maxSlice()));
+    }
+
     public void setSlice(int slice) {
         int clamped = Math.max(1, Math.min(slice, maxSlice()));
         currentSlice = clamped;

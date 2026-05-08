@@ -6,10 +6,18 @@ import macro.builder.image.dag.DagIR;
 import macro.builder.image.dag.DagIRSerializer;
 import macro.builder.image.dag.DagToIjmEmitter;
 import macro.builder.image.dag.IjmToDagLoader;
+import macro.builder.image.variation.VariantResult;
 import macro.builder.ui.ImagePreviewPanel;
+import macro.builder.ui.sandbox.variation.IjmClipboardExporter;
+import macro.builder.ui.sandbox.variation.MontageExporter;
+import macro.builder.ui.sandbox.variation.VariantGridFrame;
+import macro.builder.ui.sandbox.variation.VariationActionsBinder;
+import macro.builder.ui.sandbox.variation.VariationChooserDialog;
+import macro.builder.ui.sandbox.variation.VariationSessionLog;
 import ij.IJ;
 import ij.ImagePlus;
 import ij.measure.Calibration;
+import ij.plugin.frame.Recorder;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
@@ -36,6 +44,7 @@ import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.concurrent.CountDownLatch;
+import java.util.List;
 
 public final class SandboxDialog extends JDialog {
 
@@ -66,6 +75,8 @@ public final class SandboxDialog extends JDialog {
 
     private final SandboxModel model;
     private final PreviewHandler previewHandler;
+    private final File stateDir;
+    private final VariationSessionLog variationLog = new VariationSessionLog();
     private final CountDownLatch done = new CountDownLatch(1);
     private final DagCanvasPanel canvas;
     private final FilterCatalog catalog;
@@ -76,6 +87,8 @@ public final class SandboxDialog extends JDialog {
     private final JButton previewSelected = new JButton("Preview to selected point");
     private final JButton previewFinal = new JButton("Preview full filter");
     private final JButton largePreview = new JButton("Large view");
+    private final JButton createVariations = new JButton("Create Variations");
+    private final JButton showVariationLog = new JButton("Variation Log");
     private final JButton startFromPreset = new JButton("Start from a preset...");
     private final JButton help = new JButton("?");
     private final JButton save = new JButton("Save");
@@ -95,10 +108,12 @@ public final class SandboxDialog extends JDialog {
     private boolean updatingPrimaryChannelSelector;
     private boolean syncingPreviewSlices;
 
-    private SandboxDialog(String channelLabel, DagIR initialDag, PreviewHandler previewHandler) {
+    private SandboxDialog(String channelLabel, File stateDir, DagIR initialDag,
+                          PreviewHandler previewHandler, boolean openVariationsOnStart) {
         super((java.awt.Frame) null, "Filter Builder - " + safe(channelLabel), false);
         this.model = SandboxModel.fromDag(initialDag);
         this.previewHandler = previewHandler;
+        this.stateDir = stateDir;
         model.setChannelCount(channelCount(currentSourceDisplay()));
         this.initialIjm = DagToIjmEmitter.emit(model.toDag());
         this.initialNodeCount = countNodes(model);
@@ -166,15 +181,23 @@ public final class SandboxDialog extends JDialog {
         SwingUtilities.invokeLater(new Runnable() {
             @Override public void run() {
                 applyInitialSplitLocations();
+                if (openVariationsOnStart) openVariationsDialog();
             }
         });
     }
 
     public static Result show(String channelLabel, File binFolder, int channelIndex,
                               String seedMacro, PreviewHandler previewHandler) {
+        return show(channelLabel, binFolder, channelIndex, seedMacro, previewHandler, false);
+    }
+
+    public static Result show(String channelLabel, File binFolder, int channelIndex,
+                              String seedMacro, PreviewHandler previewHandler,
+                              boolean openVariationsOnStart) {
         if (GraphicsEnvironment.isHeadless()) return Result.cancel();
         final DagIR initialDag = loadInitialDag(binFolder, channelIndex, seedMacro);
-        final SandboxDialog dialog = new SandboxDialog(channelLabel, initialDag, previewHandler);
+        final SandboxDialog dialog = new SandboxDialog(
+                channelLabel, binFolder, initialDag, previewHandler, openVariationsOnStart);
         dialog.setVisible(true);
 
         if (SwingUtilities.isEventDispatchThread()) {
@@ -272,12 +295,16 @@ public final class SandboxDialog extends JDialog {
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.insets = new Insets(0, 0, 0, 6);
 
-        // Left cluster: large preview, start-from-preset, then help.
+        // Left cluster: large preview, variations, preset, then help.
         gbc.gridx = 0;
         gbc.gridy = 0;
         gbc.weightx = 0.0;
         gbc.fill = GridBagConstraints.NONE;
         footer.add(largePreview, gbc);
+        gbc.gridx++;
+        footer.add(createVariations, gbc);
+        gbc.gridx++;
+        footer.add(showVariationLog, gbc);
         gbc.gridx++;
         footer.add(startFromPreset, gbc);
         gbc.gridx++;
@@ -354,6 +381,10 @@ public final class SandboxDialog extends JDialog {
         });
         largePreview.setToolTipText("Open source and preview images side by side in a larger window");
         largePreview.addActionListener(e -> showLargePreview());
+        createVariations.setToolTipText("Generate and compare variants of this visual pipeline");
+        createVariations.addActionListener(e -> openVariationsDialog());
+        showVariationLog.setToolTipText("Show variation actions from this builder session");
+        showVariationLog.addActionListener(e -> variationLog.showViewer(this));
         startFromPreset.addActionListener(e -> startFromPreset());
         help.setToolTipText("What do these buttons do?");
         help.addActionListener(e -> showSandboxHelp());
@@ -438,6 +469,63 @@ public final class SandboxDialog extends JDialog {
     private void refreshLargePreviewIfOpen() {
         if (largePreviewDialog == null || !largePreviewDialog.isDisplayable()) return;
         largePreviewDialog.setImages(currentSourceDisplay(), previewImage, sourcePreview.getCurrentZ());
+    }
+
+    private void openVariationsDialog() {
+        refreshSourcePreview();
+        ImagePlus source = currentSourceDisplay();
+        if (source == null) {
+            IJ.showMessage("Variations", "No source image is available for variation generation.");
+            return;
+        }
+        if (Recorder.record) {
+            Recorder.recordString("// macro-builder variation: opened chooser\n");
+        }
+        VariationChooserDialog dialog = new VariationChooserDialog(
+                this,
+                model.toDag(),
+                source,
+                results -> onVariationResults(source, results));
+        dialog.setVisible(true);
+    }
+
+    private void onVariationResults(ImagePlus rawSource, List<VariantResult> results) {
+        if (results == null || results.isEmpty()) {
+            status.setText("No variations were generated.");
+            return;
+        }
+        variationLog.recordGenerate(results);
+        if (Recorder.record) {
+            Recorder.recordString("// macro-builder variation: generated " + results.size() + " variant(s)\n");
+        }
+        VariationActionsBinder binder = new VariationActionsBinder(
+                model,
+                canvas,
+                this,
+                variationLog,
+                stateDir,
+                sourceTitle(rawSource),
+                text -> {
+                    status.setText(text == null ? " " : text);
+                    refreshEditors();
+                });
+        VariantGridFrame frame = new VariantGridFrame(
+                "Variations: " + sourceTitle(rawSource),
+                rawSource,
+                results);
+        frame.setSessionLog(variationLog);
+        frame.setActionListener(binder);
+        frame.attachExporters(new MontageExporter(frame), new IjmClipboardExporter(frame));
+        frame.setLocationRelativeTo(this);
+        frame.setVisible(true);
+        status.setText("Generated " + results.size() + " variation(s).");
+    }
+
+    private static String sourceTitle(ImagePlus source) {
+        if (source == null || source.getTitle() == null || source.getTitle().trim().isEmpty()) {
+            return "source";
+        }
+        return source.getTitle();
     }
 
     private boolean confirmDiscardIfDirty() {
@@ -559,6 +647,8 @@ public final class SandboxDialog extends JDialog {
     private void setBusy(boolean busy, String message) {
         this.busy = busy;
         save.setEnabled(!busy);
+        createVariations.setEnabled(!busy);
+        showVariationLog.setEnabled(!busy);
         startFromPreset.setEnabled(!busy);
         refreshPreviewButtons();
         status.setText(message == null ? " " : message);

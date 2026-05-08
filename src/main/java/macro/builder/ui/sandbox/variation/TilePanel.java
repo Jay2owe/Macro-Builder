@@ -3,8 +3,11 @@ package macro.builder.ui.sandbox.variation;
 import ij.ImagePlus;
 import ij.gui.ImageCanvas;
 import ij.plugin.ZProjector;
+import ij.process.ImageProcessor;
+import macro.builder.image.variation.VariantPlan;
 
 import javax.swing.BorderFactory;
+import javax.swing.JButton;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.SwingConstants;
@@ -13,6 +16,8 @@ import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.FlowLayout;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 
 /**
  * One cell of the variant grid: a caption strip on top, an {@link ImageCanvas}
@@ -36,26 +41,45 @@ public final class TilePanel extends JPanel {
     private final ImageCanvas scrubCanvas;
     private final JPanel centre;
     private final JLabel captionLabel;
+    private final JPanel actionPanel;
+    private final String label;
+    private final boolean rawTile;
+    private final boolean errorTile;
+    private final VariantPlan plan;
 
     private ImagePlus mipImp;        // lazy
     private ImageCanvas mipCanvas;   // lazy
     private boolean mipAttempted;
     private boolean mipMode;
+    private TileActionListener actionListener;
+    private Runnable eliminateAction;
 
     public TilePanel(ImagePlus imp, String caption, boolean isRaw) {
+        this(imp, caption, isRaw, null);
+    }
+
+    public TilePanel(ImagePlus imp, String caption, boolean isRaw, VariantPlan plan) {
         super(new BorderLayout());
         if (imp == null) throw new IllegalArgumentException("imp must not be null");
         this.scrubImp = imp;
         this.scrubCanvas = new ImageCanvas(imp);
+        this.label = caption == null ? "" : caption;
+        this.rawTile = isRaw;
+        this.errorTile = false;
+        this.plan = plan;
 
-        captionLabel = new JLabel(caption == null ? "" : caption, SwingConstants.LEFT);
+        captionLabel = new JLabel(this.label, SwingConstants.LEFT);
         captionLabel.setFont(captionLabel.getFont().deriveFont(Font.BOLD, 12f));
         captionLabel.setForeground(isRaw ? new Color(0x1f, 0x4f, 0x82) : new Color(0x33, 0x33, 0x33));
         captionLabel.setBorder(BorderFactory.createEmptyBorder(2, 6, 2, 6));
 
-        JPanel north = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+        actionPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 2, 0));
+        actionPanel.setOpaque(false);
+
+        JPanel north = new JPanel(new BorderLayout());
         north.setOpaque(false);
-        north.add(captionLabel);
+        north.add(captionLabel, BorderLayout.CENTER);
+        north.add(actionPanel, BorderLayout.EAST);
 
         centre = new JPanel(new BorderLayout());
         centre.setBackground(Color.BLACK);
@@ -65,22 +89,33 @@ public final class TilePanel extends JPanel {
         add(centre, BorderLayout.CENTER);
         setBorder(BorderFactory.createLineBorder(new Color(0xc0, 0xc0, 0xc0), 1));
         setBackground(Color.WHITE);
+        installFocusRequest();
     }
 
     /** Build a tile that renders an error result instead of an image. */
     public static TilePanel forError(String caption, Throwable error) {
-        return new TilePanel(caption, error);
+        return new TilePanel(caption, error, null);
     }
 
-    private TilePanel(String caption, Throwable error) {
+    public static TilePanel forError(String caption, Throwable error, VariantPlan plan) {
+        return new TilePanel(caption, error, plan);
+    }
+
+    private TilePanel(String caption, Throwable error, VariantPlan plan) {
         super(new BorderLayout());
         this.scrubImp = null;
         this.scrubCanvas = null;
+        this.label = caption == null ? "(error)" : caption;
+        this.rawTile = false;
+        this.errorTile = true;
+        this.plan = plan;
 
-        captionLabel = new JLabel(caption == null ? "(error)" : caption, SwingConstants.LEFT);
+        captionLabel = new JLabel(this.label, SwingConstants.LEFT);
         captionLabel.setFont(captionLabel.getFont().deriveFont(Font.BOLD, 12f));
         captionLabel.setForeground(new Color(0x99, 0x00, 0x00));
         captionLabel.setBorder(BorderFactory.createEmptyBorder(2, 6, 2, 6));
+        actionPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 2, 0));
+        actionPanel.setOpaque(false);
 
         String msg = error == null ? "unknown error" : String.valueOf(error.getMessage());
         if (msg == null || msg.isEmpty()) msg = error == null ? "unknown error" : error.getClass().getSimpleName();
@@ -92,14 +127,16 @@ public final class TilePanel extends JPanel {
         centre.setBackground(new Color(0xff, 0xee, 0xee));
         centre.add(body, BorderLayout.CENTER);
 
-        JPanel north = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+        JPanel north = new JPanel(new BorderLayout());
         north.setOpaque(false);
-        north.add(captionLabel);
+        north.add(captionLabel, BorderLayout.CENTER);
+        north.add(actionPanel, BorderLayout.EAST);
 
         add(north, BorderLayout.NORTH);
         add(centre, BorderLayout.CENTER);
         setBorder(BorderFactory.createLineBorder(new Color(0x99, 0x00, 0x00), 2));
         setBackground(new Color(0xff, 0xf3, 0xf3));
+        installFocusRequest();
     }
 
     public boolean hasImage() {
@@ -111,10 +148,47 @@ public final class TilePanel extends JPanel {
         return scrubImp;
     }
 
+    public String label() {
+        return label;
+    }
+
+    public boolean isRawTile() {
+        return rawTile;
+    }
+
+    public boolean isErrorTile() {
+        return errorTile;
+    }
+
+    public VariantPlan plan() {
+        return plan;
+    }
+
     /** The currently displayed {@link ImageCanvas}, or {@code null} for error tiles. */
     public ImageCanvas getActiveCanvas() {
         if (mipMode && mipCanvas != null) return mipCanvas;
         return scrubCanvas;
+    }
+
+    public ImageProcessor currentSliceProcessor() {
+        if (scrubImp == null) return null;
+        int slice = Math.max(1, Math.min(scrubImp.getCurrentSlice(), scrubImp.getStackSize()));
+        ImageProcessor processor = scrubImp.getStack() == null
+                ? scrubImp.getProcessor()
+                : scrubImp.getStack().getProcessor(slice);
+        return processor == null ? null : processor.duplicate();
+    }
+
+    public void setActions(TileActionListener listener, Runnable eliminateAction) {
+        this.actionListener = listener;
+        this.eliminateAction = eliminateAction;
+        rebuildActionButtons(true, true);
+    }
+
+    public void setCompareActions(TileActionListener listener) {
+        this.actionListener = listener;
+        this.eliminateAction = null;
+        rebuildActionButtons(true, false);
     }
 
     /**
@@ -156,6 +230,52 @@ public final class TilePanel extends JPanel {
             mipImp = null;
             mipCanvas = null;
         }
+    }
+
+    private void rebuildActionButtons(boolean allowPromoteSave, boolean allowEliminate) {
+        actionPanel.removeAll();
+        if (!rawTile) {
+            if (allowPromoteSave && !errorTile && plan != null) {
+                JButton promote = smallButton("Promote", "Promote this variant into the visual pipeline");
+                promote.addActionListener(e -> {
+                    if (actionListener != null) actionListener.onPromote(plan);
+                });
+                JButton save = smallButton("Save", "Save this variant as a preset");
+                save.addActionListener(e -> {
+                    if (actionListener != null) actionListener.onSavePreset(plan);
+                });
+                actionPanel.add(promote);
+                actionPanel.add(save);
+            }
+            if (allowEliminate && eliminateAction != null) {
+                JButton eliminate = smallButton("X", "Eliminate this tile from view");
+                eliminate.addActionListener(e -> eliminateAction.run());
+                actionPanel.add(eliminate);
+            }
+        }
+        actionPanel.revalidate();
+        actionPanel.repaint();
+    }
+
+    private static JButton smallButton(String text, String tooltip) {
+        JButton button = new JButton(text);
+        button.setToolTipText(tooltip);
+        button.setFocusable(false);
+        button.setMargin(new java.awt.Insets(1, 4, 1, 4));
+        button.setFont(button.getFont().deriveFont(10f));
+        return button;
+    }
+
+    private void installFocusRequest() {
+        setFocusable(true);
+        MouseAdapter focusOnClick = new MouseAdapter() {
+            @Override public void mousePressed(MouseEvent e) {
+                requestFocusInWindow();
+            }
+        };
+        addMouseListener(focusOnClick);
+        if (scrubCanvas != null) scrubCanvas.addMouseListener(focusOnClick);
+        centre.addMouseListener(focusOnClick);
     }
 
     @Override

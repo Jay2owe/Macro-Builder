@@ -13,7 +13,7 @@ import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
 
-final class SandboxModel {
+public final class SandboxModel {
     static final int MAX_LINES = 4;
 
     final List<Line> lines = new ArrayList<Line>();
@@ -26,7 +26,7 @@ final class SandboxModel {
     private int nextNode = 1;
     private int nextCombiner = 1;
 
-    static SandboxModel fromDag(DagIR dag) {
+    public static SandboxModel fromDag(DagIR dag) {
         SandboxModel model = new SandboxModel();
         if (dag != null) {
             model.primaryChannel = dag.primaryChannel;
@@ -54,7 +54,7 @@ final class SandboxModel {
         return model;
     }
 
-    DagIR toDag() {
+    public DagIR toDag() {
         List<DagLine> dagLines = new ArrayList<DagLine>();
         for (int i = 0; i < lines.size(); i++) {
             Line line = lines.get(i);
@@ -108,6 +108,22 @@ final class SandboxModel {
             }
         }
         return toDag();
+    }
+
+    public void replaceWith(DagIR dag) {
+        int existingChannelCount = channelCount;
+        SandboxModel fresh = fromDag(dag);
+        fresh.setChannelCount(existingChannelCount);
+        lines.clear();
+        lines.addAll(fresh.lines);
+        combiners.clear();
+        combiners.addAll(fresh.combiners);
+        primaryChannel = fresh.primaryChannel;
+        channelCount = fresh.channelCount;
+        selected = null;
+        clearLineSelection();
+        reseedCounters();
+        if (!lines.isEmpty()) selectLine(lines.get(0), false, false);
     }
 
     void addLine() {

@@ -57,6 +57,25 @@ public class DagIRRoundTripTest {
     }
 
     @Test
+    public void serializesBranchNames() {
+        DagIR dag = new DagIR(1, 1,
+                Arrays.asList(
+                        new DagLine("line_A", "Objects", Collections.<DagNode>emptyList(), 1),
+                        new DagLine("line_B", "Marker mask", Collections.<DagNode>emptyList(), 2)),
+                Collections.<Combiner>emptyList(),
+                "line_A",
+                "native");
+
+        String json = DagIRSerializer.toJson(dag);
+        DagIR roundTripped = DagIRSerializer.fromJson(json);
+
+        assertEquals(dag, roundTripped);
+        assertEquals("Objects", roundTripped.lines.get(0).name);
+        assertEquals("Marker mask", roundTripped.lines.get(1).name);
+        assertTrue(json.indexOf("\"name\":\"Marker mask\"") >= 0);
+    }
+
+    @Test
     public void emittedIjmDuplicatesBranchSourceChannel() {
         DagIR dag = new DagIR(1, 1,
                 Arrays.asList(
@@ -114,6 +133,7 @@ public class DagIRRoundTripTest {
 
         assertEquals(1, dag.primaryChannel);
         assertEquals(1, dag.lines.get(0).sourceChannel);
+        assertEquals("", dag.lines.get(0).name);
     }
 
     @Test(expected = IllegalArgumentException.class)

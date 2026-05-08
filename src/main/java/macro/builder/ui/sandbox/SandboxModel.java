@@ -32,7 +32,7 @@ final class SandboxModel {
             model.primaryChannel = dag.primaryChannel;
             for (int i = 0; i < dag.lines.size(); i++) {
                 DagLine dagLine = dag.lines.get(i);
-                Line line = new Line(dagLine.id, dagLine.sourceChannel);
+                Line line = new Line(dagLine.id, dagLine.name, dagLine.sourceChannel);
                 for (int j = 0; j < dagLine.ops.size(); j++) {
                     DagNode node = dagLine.ops.get(j);
                     line.nodes.add(new Node(node.id.length() == 0 ? "node_" + model.nextNode++ : node.id,
@@ -63,7 +63,7 @@ final class SandboxModel {
                 Node node = line.nodes.get(j);
                 nodes.add(new DagNode(node.id, node.type, node.args, node.commandName, node.menuPath));
             }
-            dagLines.add(new DagLine(line.id, nodes, line.sourceChannel));
+            dagLines.add(new DagLine(line.id, line.name, nodes, line.sourceChannel));
         }
         List<Combiner> dagCombiners = new ArrayList<Combiner>();
         for (int i = 0; i < combiners.size(); i++) {
@@ -88,7 +88,7 @@ final class SandboxModel {
                     nodes.add(new DagNode(node.id, node.type, node.args, node.commandName, node.menuPath));
                     if (node == selectedNode) break;
                 }
-                partialLines.add(new DagLine(line.id, nodes, line.sourceChannel));
+                partialLines.add(new DagLine(line.id, line.name, nodes, line.sourceChannel));
                 if (line.nodes.contains(selectedNode)) {
                     return new DagIR(1, primaryChannel, partialLines, Collections.<Combiner>emptyList(),
                             line.id, executionTier(partialLines));
@@ -118,17 +118,18 @@ final class SandboxModel {
         selectLine(line, false, false);
     }
 
-    void addNode(Line line, FilterCatalog.Entry entry) {
-        addNode(line, entry, entry == null ? "" : entry.defaultArgs);
+    Node addNode(Line line, FilterCatalog.Entry entry) {
+        return addNode(line, entry, entry == null ? "" : entry.defaultArgs);
     }
 
-    void addNode(Line line, FilterCatalog.Entry entry, String args) {
-        if (line == null || entry == null || entry.stub || entry.type == null) return;
+    Node addNode(Line line, FilterCatalog.Entry entry, String args) {
+        if (line == null || entry == null || entry.stub || entry.type == null) return null;
         Node node = new Node("node_" + nextNode++, entry.type, args,
                 entry.legacy ? entry.commandName : "",
                 entry.legacy ? entry.menuPath : "");
         line.nodes.add(node);
         selectNode(node);
+        return node;
     }
 
     boolean hasLegacyNode() {
@@ -248,6 +249,11 @@ final class SandboxModel {
         line.sourceChannel = clampChannel(channel);
     }
 
+    void setLineName(Line line, String name) {
+        if (line == null) return;
+        line.name = name == null ? "" : name.trim();
+    }
+
     void setChannelCount(int count) {
         channelCount = Math.max(1, count);
         primaryChannel = clampChannel(primaryChannel);
@@ -308,6 +314,7 @@ final class SandboxModel {
 
     static final class Line {
         final String id;
+        String name;
         int sourceChannel;
         final List<Node> nodes = new ArrayList<Node>();
 
@@ -316,7 +323,12 @@ final class SandboxModel {
         }
 
         Line(String id, int sourceChannel) {
+            this(id, "", sourceChannel);
+        }
+
+        Line(String id, String name, int sourceChannel) {
             this.id = id == null || id.trim().isEmpty() ? "line_A" : id;
+            this.name = name == null ? "" : name.trim();
             this.sourceChannel = sourceChannel < 1 ? 1 : sourceChannel;
         }
     }

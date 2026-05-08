@@ -31,9 +31,9 @@ Use one of the two `Workflows` authoring tiles:
 
 The visual builder has source and output previews on the left, the sandbox in the middle, and grouped `Available steps` on the right. Step groups include filters, 3D commands, binary commands, image type conversions, plugins, and other Fiji commands.
 
-Use a row `+` button in `Available steps` to add that command to the selected branch. You can also select a command row, then click `+ Add step` on a branch. Double-click or right-click a step in the sandbox to edit its parameters. Right-click a step to preview to that point or delete it.
+Use a row `+` button in `Available steps`, or double-click a command row, to add that command to the selected branch. You can also select a command row, then click `+ Add step` on a branch. New steps open their parameter editor automatically. Spatial parameters such as `sigma`, `radius`, `rolling`, `x`, `y`, and `z` are labelled as pixels, not microns. Double-click or right-click a step in the sandbox to edit its parameters later. Right-click a step to preview to that point or delete it.
 
-Use `+ Add parallel branch` to add another branch. Ctrl-click branches to toggle them, or Shift-click to select a range, then click `Merge selected branches`. Double-click or right-click a merge card to change its operation or inputs.
+Use `+ Add parallel branch` to add another branch. Each branch has an optional `Name` field, which is saved with the filter and shown in merge labels. Ctrl-click branches to toggle them, or Shift-click to select a range, then click `Merge selected branches`. Double-click or right-click a merge card to change its operation, inputs, and input order.
 
 `Preview to selected point` runs only up to the selected step or merge card. `Preview full filter` runs the whole builder chain. Both preview buttons update the embedded output preview and leave the selected source image unchanged.
 
@@ -41,7 +41,7 @@ Use `+ Add parallel branch` to add another branch. Ctrl-click branches to toggle
 
 When the selected source image has more than one channel, the visual builder shows a `Primary channel` control with numeric channel choices such as `C1`, `C2`, and `C3`. Branch 1 starts from the primary channel. Additional parallel branches can start from any available channel.
 
-Example: choose `C1` as the primary object channel, add a second branch from `C2`, filter the `C2` branch, then merge the two branches with `Subtract` so the output is `C1` minus the processed `C2` signal. `Subtract` is ordered: the first selected input is the image being subtracted from, and later selected inputs are subtracted from it.
+Example: choose `C1` as the primary object channel, add a second branch from `C2`, filter the `C2` branch, then merge the two branches with `Subtract` so the output is `C1` minus the processed `C2` signal. Merge input order is editable from the merge card; ordered operations such as `Subtract`, and ImageJ fallback `AND` operations with several inputs, use the listed order.
 
 The generated macro appears in the `Loaded Macro` panel.
 

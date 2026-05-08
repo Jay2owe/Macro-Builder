@@ -264,8 +264,6 @@ public final class FilterCatalog extends JPanel {
                 + "</b><br><span style='font-size:9px;'>" + html(path) + "</span></html>");
         label.setOpaque(false);
         label.setEnabled(!entry.stub);
-        row.add(label, BorderLayout.CENTER);
-
         JButton add = new JButton("+");
         add.setMargin(new Insets(1, 7, 1, 7));
         add.setEnabled(!entry.stub);
@@ -274,7 +272,8 @@ public final class FilterCatalog extends JPanel {
             selectEntry(entry);
             if (addListener != null && !entry.stub) addListener.onAddRequested(entry);
         });
-        row.add(add, BorderLayout.EAST);
+        row.add(add, BorderLayout.WEST);
+        row.add(label, BorderLayout.CENTER);
 
         MouseAdapter selector = new MouseAdapter() {
             @Override public void mouseClicked(MouseEvent e) {

@@ -7,6 +7,7 @@ import javax.swing.JButton;
 import javax.swing.JLabel;
 import java.awt.Component;
 import java.awt.Container;
+import java.awt.event.MouseEvent;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -123,6 +124,35 @@ public class FilterCatalogTest {
         assertEquals(added.get(0), catalog.getSelectedEntry());
     }
 
+    @Test
+    public void doubleClickingRowRequestsEntryThroughExistingListener() {
+        FilterCatalog catalog = new FilterCatalog(Collections.<FilterCatalog.Entry>emptyList());
+        catalog.setSearchTextForTests("Enhance Contrast");
+
+        final List<FilterCatalog.Entry> added = new ArrayList<FilterCatalog.Entry>();
+        catalog.setAddRequestListener(new FilterCatalog.AddRequestListener() {
+            @Override public void onAddRequested(FilterCatalog.Entry entry) {
+                added.add(entry);
+            }
+        });
+
+        JLabel label = findEntryLabel(catalog, "Enhance Contrast");
+        assertNotNull(label);
+        label.dispatchEvent(new MouseEvent(label,
+                MouseEvent.MOUSE_CLICKED,
+                System.currentTimeMillis(),
+                0,
+                4,
+                4,
+                2,
+                false,
+                MouseEvent.BUTTON1));
+
+        assertEquals(1, added.size());
+        assertEquals("Enhance Contrast", added.get(0).label);
+        assertEquals(added.get(0), catalog.getSelectedEntry());
+    }
+
     private static void assertCatalogEntry(FilterCatalog catalog, String label,
                                            OpType type, String args,
                                            FilterCatalog.CatalogGroup group) {
@@ -171,6 +201,23 @@ public class FilterCatalogTest {
             }
             if (component instanceof Container) {
                 JButton nested = findAddButton((Container) component, label);
+                if (nested != null) return nested;
+            }
+        }
+        return null;
+    }
+
+    private static JLabel findEntryLabel(Container root, String label) {
+        if (root == null) return null;
+        for (int i = 0; i < root.getComponentCount(); i++) {
+            Component component = root.getComponent(i);
+            if (component instanceof JLabel) {
+                JLabel candidate = (JLabel) component;
+                String text = candidate.getText();
+                if (text != null && text.indexOf(label) >= 0) return candidate;
+            }
+            if (component instanceof Container) {
+                JLabel nested = findEntryLabel((Container) component, label);
                 if (nested != null) return nested;
             }
         }

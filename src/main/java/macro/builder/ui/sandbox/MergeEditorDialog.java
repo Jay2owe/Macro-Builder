@@ -3,12 +3,16 @@ package macro.builder.ui.sandbox;
 import macro.builder.image.dag.CombinerOp;
 
 import javax.swing.BorderFactory;
+import javax.swing.DefaultListModel;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
+import javax.swing.JList;
 import javax.swing.JPanel;
+import javax.swing.JScrollPane;
+import javax.swing.ListSelectionModel;
 import javax.swing.SwingUtilities;
 import java.awt.BorderLayout;
 import java.awt.Color;
@@ -18,9 +22,11 @@ import java.awt.FlowLayout;
 import java.awt.Frame;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
+import java.awt.GridLayout;
 import java.awt.Insets;
 import java.awt.Window;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 final class MergeEditorDialog {
@@ -30,9 +36,13 @@ final class MergeEditorDialog {
     private final JPanel panel = new JPanel(new GridBagLayout());
     private final JComboBox<CombinerOp> operation = new JComboBox<CombinerOp>(CombinerOp.values());
     private final List<InputBinding> inputBindings = new ArrayList<InputBinding>();
+    private final DefaultListModel<InputOrderItem> orderModel = new DefaultListModel<InputOrderItem>();
+    private final JList<InputOrderItem> orderList = new JList<InputOrderItem>(orderModel);
     private final JLabel orderHint = new JLabel(" ");
     private final JLabel validation = new JLabel(" ");
     private JButton ok;
+    private JButton moveUp;
+    private JButton moveDown;
     private boolean accepted;
     private boolean changed;
 
@@ -77,6 +87,19 @@ final class MergeEditorDialog {
         appendSelected(ordered, currentInputs, selectedLineIds);
         appendSelected(ordered, selectedLineIds, selectedLineIds);
         return ordered;
+    }
+
+    static List<String> moveInput(List<String> inputs, int selectedIndex, int direction) {
+        List<String> moved = inputs == null
+                ? new ArrayList<String>()
+                : new ArrayList<String>(inputs);
+        int targetIndex = selectedIndex + direction;
+        if (selectedIndex < 0 || selectedIndex >= moved.size()
+                || targetIndex < 0 || targetIndex >= moved.size()) {
+            return moved;
+        }
+        Collections.swap(moved, selectedIndex, targetIndex);
+        return moved;
     }
 
     static boolean applySelection(SandboxModel.CombinerNode combiner,
@@ -128,10 +151,17 @@ final class MergeEditorDialog {
             SandboxModel.Line line = model.lines.get(i);
             JCheckBox box = new JCheckBox(branchLabel(line) + " (" + line.id + ")",
                     combiner.inputs.contains(line.id));
-            box.addActionListener(e -> refreshValidation());
+            box.addActionListener(e -> {
+                syncOrderFromCheckedInputs();
+                refreshValidation();
+            });
             inputBindings.add(new InputBinding(line.id, box));
             addField(box, 0, row++);
         }
+
+        addLabel("Order", 0, row++, 2, false);
+        addField(buildOrderPanel(), 0, row++);
+        syncOrderFromCheckedInputs();
 
         orderHint.setForeground(new Color(80, 80, 80));
         addField(orderHint, 0, row++);
@@ -140,13 +170,98 @@ final class MergeEditorDialog {
         addField(validation, 0, row);
     }
 
+    private JPanel buildOrderPanel() {
+        JPanel orderPanel = new JPanel(new BorderLayout(6, 0));
+        orderList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        orderList.setVisibleRowCount(Math.min(4, Math.max(2, model.lines.size())));
+        orderList.addListSelectionListener(e -> {
+            if (!e.getValueIsAdjusting()) refreshMoveButtons();
+        });
+        orderPanel.add(new JScrollPane(orderList), BorderLayout.CENTER);
+
+        JPanel moves = new JPanel(new GridLayout(2, 1, 0, 4));
+        moveUp = new JButton("Move up");
+        moveDown = new JButton("Move down");
+        moveUp.addActionListener(e -> moveSelectedOrder(-1));
+        moveDown.addActionListener(e -> moveSelectedOrder(1));
+        moves.add(moveUp);
+        moves.add(moveDown);
+        orderPanel.add(moves, BorderLayout.EAST);
+        return orderPanel;
+    }
+
     private List<String> selectedInputs() {
+        List<String> ordered = orderIds();
+        if (!ordered.isEmpty()) return ordered;
+
         List<String> selected = new ArrayList<String>();
         for (int i = 0; i < inputBindings.size(); i++) {
             InputBinding binding = inputBindings.get(i);
             if (binding.box.isSelected()) selected.add(binding.lineId);
         }
         return orderedSelectedInputs(combiner.inputs, selected);
+    }
+
+    private void syncOrderFromCheckedInputs() {
+        List<String> selected = new ArrayList<String>();
+        for (int i = 0; i < inputBindings.size(); i++) {
+            InputBinding binding = inputBindings.get(i);
+            if (binding.box.isSelected()) selected.add(binding.lineId);
+        }
+        List<String> currentOrder = orderIds();
+        if (currentOrder.isEmpty()) currentOrder = combiner.inputs;
+        setOrderIds(orderedSelectedInputs(currentOrder, selected));
+    }
+
+    private void moveSelectedOrder(int direction) {
+        int selectedIndex = orderList.getSelectedIndex();
+        List<String> moved = moveInput(orderIds(), selectedIndex, direction);
+        if (moved.equals(orderIds())) return;
+        setOrderIds(moved);
+        orderList.setSelectedIndex(selectedIndex + direction);
+        refreshValidation();
+    }
+
+    private List<String> orderIds() {
+        List<String> ids = new ArrayList<String>();
+        for (int i = 0; i < orderModel.size(); i++) {
+            ids.add(orderModel.getElementAt(i).lineId);
+        }
+        return ids;
+    }
+
+    private void setOrderIds(List<String> ids) {
+        String selected = selectedOrderLineId();
+        orderModel.clear();
+        if (ids != null) {
+            for (int i = 0; i < ids.size(); i++) {
+                String id = ids.get(i);
+                orderModel.addElement(new InputOrderItem(id, branchName(id)));
+            }
+        }
+        int selectedIndex = indexOfOrderLine(selected);
+        if (selectedIndex < 0 && orderModel.size() > 0) selectedIndex = 0;
+        if (selectedIndex >= 0) orderList.setSelectedIndex(selectedIndex);
+        refreshMoveButtons();
+    }
+
+    private String selectedOrderLineId() {
+        InputOrderItem selected = orderList.getSelectedValue();
+        return selected == null ? null : selected.lineId;
+    }
+
+    private int indexOfOrderLine(String lineId) {
+        if (lineId == null) return -1;
+        for (int i = 0; i < orderModel.size(); i++) {
+            if (lineId.equals(orderModel.getElementAt(i).lineId)) return i;
+        }
+        return -1;
+    }
+
+    private void refreshMoveButtons() {
+        int selectedIndex = orderList.getSelectedIndex();
+        if (moveUp != null) moveUp.setEnabled(selectedIndex > 0);
+        if (moveDown != null) moveDown.setEnabled(selectedIndex >= 0 && selectedIndex < orderModel.size() - 1);
     }
 
     private void refreshValidation() {
@@ -156,10 +271,13 @@ final class MergeEditorDialog {
             orderHint.setText("Subtract order: " + describeInputs(selectedInputs, " minus "));
         } else if (operation.getSelectedItem() == CombinerOp.SUBTRACT) {
             orderHint.setText("Subtract uses input order: first input minus later inputs.");
+        } else if (valid) {
+            orderHint.setText("Merge order: " + describeInputs(selectedInputs, " then "));
         } else {
-            orderHint.setText(" ");
+            orderHint.setText("Use Move up and Move down to set merge order.");
         }
         validation.setText(valid ? " " : "Select at least two inputs.");
+        refreshMoveButtons();
         if (ok != null) ok.setEnabled(valid);
     }
 
@@ -168,7 +286,7 @@ final class MergeEditorDialog {
         String source = index == 0 && line.sourceChannel == model.primaryChannel
                 ? "Primary C" + model.primaryChannel
                 : "C" + line.sourceChannel;
-        return "Branch " + (index + 1) + " - " + source;
+        return branchName(line == null ? null : line.id) + " - " + source;
     }
 
     private String describeInputs(List<String> inputs, String separator) {
@@ -182,7 +300,12 @@ final class MergeEditorDialog {
 
     private String branchName(String lineId) {
         for (int i = 0; i < model.lines.size(); i++) {
-            if (model.lines.get(i).id.equals(lineId)) return "Branch " + (i + 1);
+            SandboxModel.Line line = model.lines.get(i);
+            if (line.id.equals(lineId)) {
+                String base = "Branch " + (i + 1);
+                if (line.name == null || line.name.trim().length() == 0) return base;
+                return base + ": " + line.name.trim();
+            }
         }
         return lineId == null ? "unknown branch" : lineId;
     }
@@ -233,6 +356,20 @@ final class MergeEditorDialog {
         InputBinding(String lineId, JCheckBox box) {
             this.lineId = lineId;
             this.box = box;
+        }
+    }
+
+    private static final class InputOrderItem {
+        private final String lineId;
+        private final String label;
+
+        InputOrderItem(String lineId, String label) {
+            this.lineId = lineId;
+            this.label = label == null ? "" : label;
+        }
+
+        @Override public String toString() {
+            return label;
         }
     }
 }

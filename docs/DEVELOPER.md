@@ -109,7 +109,7 @@ Current automated tests cover:
 
 - ImageJ macro parser behavior.
 - Visual graph serialization and round-tripping.
-- Sandbox catalog grouping, inline edit helpers, branch multi-selection, and selected-branch merge ordering.
+- Sandbox catalog grouping, inline edit helpers, branch naming, branch multi-selection, selected-branch merge ordering, and merge input reordering.
 - Native `2D particles` and `3D stack objects` counting.
 - Single-image threshold shootouts, including native-scale fixed thresholds.
 - Batch count CSV behavior and window cleanup.

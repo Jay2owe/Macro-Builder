@@ -27,6 +27,8 @@ public final class DagIRSerializer {
             sb.append("{");
             appendField(sb, "id", quote(line.id));
             sb.append(",");
+            appendField(sb, "name", quote(line.name));
+            sb.append(",");
             appendField(sb, "sourceChannel", Integer.toString(line.sourceChannel));
             sb.append(",");
             sb.append(quote("ops")).append(":[");
@@ -86,6 +88,7 @@ public final class DagIRSerializer {
         for (int i = 0; i < rawLines.size(); i++) {
             Map<String, Object> rawLine = asObject(rawLines.get(i), "lines[" + i + "]");
             String id = asString(required(rawLine, "id"), "lines[" + i + "].id");
+            String name = asString(optional(rawLine, "name", ""), "lines[" + i + "].name");
             int sourceChannel = asInt(optional(rawLine, "sourceChannel", Long.valueOf(1)),
                     "lines[" + i + "].sourceChannel");
             List<DagNode> ops = new ArrayList<DagNode>();
@@ -100,7 +103,7 @@ public final class DagIRSerializer {
                 String menuPath = asString(optional(rawNode, "menuPath", ""), "node.menuPath");
                 ops.add(new DagNode(nodeId, parseOpType(typeName), args, commandName, menuPath));
             }
-            lines.add(new DagLine(id, ops, sourceChannel));
+            lines.add(new DagLine(id, name, ops, sourceChannel));
         }
 
         List<Combiner> combiners = new ArrayList<Combiner>();

@@ -40,8 +40,8 @@ public class SandboxModelTest {
     public void toDagPreservesPrimaryAndBranchChannels() {
         SandboxModel model = SandboxModel.fromDag(new DagIR(1, 2,
                 Arrays.asList(
-                        new DagLine("line_A", Collections.<DagNode>emptyList(), 2),
-                        new DagLine("line_B", Collections.<DagNode>emptyList(), 3)),
+                        new DagLine("line_A", "Primary objects", Collections.<DagNode>emptyList(), 2),
+                        new DagLine("line_B", "Marker mask", Collections.<DagNode>emptyList(), 3)),
                 Collections.<Combiner>emptyList(),
                 "line_A",
                 "native"));
@@ -52,6 +52,21 @@ public class SandboxModelTest {
         assertEquals(2, dag.primaryChannel);
         assertEquals(2, dag.lines.get(0).sourceChannel);
         assertEquals(3, dag.lines.get(1).sourceChannel);
+        assertEquals("Primary objects", dag.lines.get(0).name);
+        assertEquals("Marker mask", dag.lines.get(1).name);
+    }
+
+    @Test
+    public void setLineNamePersistsToDag() {
+        SandboxModel model = modelWithLines(2);
+
+        model.setLineName(model.lines.get(0), "Objects");
+        model.setLineName(model.lines.get(1), "Marker mask");
+
+        DagIR dag = model.toDag();
+
+        assertEquals("Objects", dag.lines.get(0).name);
+        assertEquals("Marker mask", dag.lines.get(1).name);
     }
 
     @Test

@@ -50,6 +50,16 @@ public class MergeEditorDialogTest {
         assertEquals(Arrays.asList("line_B", "line_A", "line_C"), ordered);
     }
 
+    @Test
+    public void moveInputChangesOrderWithinBounds() {
+        List<String> inputs = Arrays.asList("line_A", "line_B", "line_C");
+
+        assertEquals(Arrays.asList("line_A", "line_C", "line_B"),
+                MergeEditorDialog.moveInput(inputs, 2, -1));
+        assertEquals(inputs, MergeEditorDialog.moveInput(inputs, 0, -1));
+        assertEquals(inputs, MergeEditorDialog.moveInput(inputs, 2, 1));
+    }
+
     @Test(expected = IllegalArgumentException.class)
     public void applySelectionRejectsInvalidMerge() {
         SandboxModel.CombinerNode combiner = new SandboxModel.CombinerNode("combiner_1",

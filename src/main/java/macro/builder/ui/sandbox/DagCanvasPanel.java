@@ -10,13 +10,18 @@ import javax.swing.JLabel;
 import javax.swing.JMenuItem;
 import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
+import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
 import java.awt.Point;
+import java.awt.event.FocusAdapter;
+import java.awt.event.FocusEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 
@@ -166,12 +171,15 @@ public final class DagCanvasPanel extends JPanel {
 
         gbc.gridx = 0;
         gbc.gridwidth = 3;
+        gbc.gridy = 1;
+        panel.add(buildNameField(line), gbc);
+
         for (int i = 0; i < line.nodes.size(); i++) {
-            gbc.gridy = i + 1;
+            gbc.gridy = i + 2;
             panel.add(buildNodeCard(line, line.nodes.get(i)), gbc);
         }
 
-        gbc.gridy = line.nodes.size() + 1;
+        gbc.gridy = line.nodes.size() + 2;
         JButton addNode = new JButton("+ Add step");
         addNode.addActionListener(e -> {
             FilterCatalog.Entry entry = catalogSupplier == null ? null : catalogSupplier.getSelectedCatalogEntry();
@@ -179,13 +187,43 @@ public final class DagCanvasPanel extends JPanel {
             if (nodeCreator != null) {
                 added = nodeCreator.addNode(line, entry);
             } else {
-                model.addNode(line, entry);
-                added = true;
+                added = model.addNode(line, entry) != null;
             }
             if (added) changedAndSelected();
         });
         panel.add(addNode, gbc);
         return panel;
+    }
+
+    private JPanel buildNameField(final SandboxModel.Line line) {
+        JPanel row = new JPanel(new GridBagLayout());
+        row.setOpaque(false);
+        GridBagConstraints gbc = baseGbc();
+        gbc.insets = new Insets(0, 0, 0, 4);
+        row.add(new JLabel("Name:"), gbc);
+
+        final JTextField name = new JTextField(line.name, 10);
+        name.setToolTipText("Optional branch name");
+        name.getDocument().addDocumentListener(new DocumentListener() {
+            @Override public void insertUpdate(DocumentEvent e) { update(); }
+            @Override public void removeUpdate(DocumentEvent e) { update(); }
+            @Override public void changedUpdate(DocumentEvent e) { update(); }
+            private void update() {
+                model.setLineName(line, name.getText());
+                if (changeCallback != null) changeCallback.run();
+            }
+        });
+        name.addActionListener(e -> rebuild());
+        name.addFocusListener(new FocusAdapter() {
+            @Override public void focusLost(FocusEvent e) {
+                rebuild();
+            }
+        });
+        gbc.gridx = 1;
+        gbc.weightx = 1.0;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        row.add(name, gbc);
+        return row;
     }
 
     private String sourceLabel(SandboxModel.Line line) {
@@ -426,7 +464,7 @@ public final class DagCanvasPanel extends JPanel {
         if (combiner.op == CombinerOp.SUBTRACT) {
             return "Subtract: " + joinBranchInputs(combiner.inputs, " minus ");
         }
-        return combiner.op + ": " + joinBranchInputs(combiner.inputs, ", ");
+        return combiner.op + ": " + joinBranchInputs(combiner.inputs, " then ");
     }
 
     private String joinBranchInputs(java.util.List<String> inputs, String separator) {
@@ -441,9 +479,16 @@ public final class DagCanvasPanel extends JPanel {
 
     private String branchLabel(String lineId) {
         for (int i = 0; i < model.lines.size(); i++) {
-            if (model.lines.get(i).id.equals(lineId)) return "Branch " + (i + 1);
+            SandboxModel.Line line = model.lines.get(i);
+            if (line.id.equals(lineId)) return branchLabel(line, i);
         }
         return lineId == null ? "unknown branch" : lineId;
+    }
+
+    private String branchLabel(SandboxModel.Line line, int index) {
+        String base = "Branch " + (index + 1);
+        if (line == null || line.name == null || line.name.trim().length() == 0) return base;
+        return base + ": " + line.name.trim();
     }
 
     private boolean showCombinerMenuIfRequested(MouseEvent e, SandboxModel.CombinerNode combiner) {

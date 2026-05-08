@@ -6,6 +6,7 @@ import java.util.List;
 
 public final class DagLine {
     public final String id;
+    public final String name;
     public final int sourceChannel;
     public final List<DagNode> ops;
 
@@ -14,7 +15,12 @@ public final class DagLine {
     }
 
     public DagLine(String id, List<DagNode> ops, int sourceChannel) {
+        this(id, "", ops, sourceChannel);
+    }
+
+    public DagLine(String id, String name, List<DagNode> ops, int sourceChannel) {
         this.id = id == null ? "" : id;
+        this.name = name == null ? "" : name.trim();
         this.sourceChannel = positiveChannel(sourceChannel);
         if (ops == null) {
             this.ops = Collections.emptyList();
@@ -29,6 +35,7 @@ public final class DagLine {
         if (!(obj instanceof DagLine)) return false;
         DagLine other = (DagLine) obj;
         return id.equals(other.id)
+                && name.equals(other.name)
                 && sourceChannel == other.sourceChannel
                 && ops.equals(other.ops);
     }
@@ -36,6 +43,7 @@ public final class DagLine {
     @Override
     public int hashCode() {
         int result = id.hashCode();
+        result = 31 * result + name.hashCode();
         result = 31 * result + sourceChannel;
         result = 31 * result + ops.hashCode();
         return result;

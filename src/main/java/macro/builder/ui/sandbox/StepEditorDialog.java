@@ -33,12 +33,18 @@ final class StepEditorDialog {
         if (ArgsEditorModel.hasEditableParameters(tokens)) {
             this.rawOptions = null;
             int row = 1;
+            if (ArgsEditorModel.hasPixelParameters(tokens)) {
+                addHint("Spatial values use pixels, not microns.", 0, row++, 2);
+            }
             for (int i = 0; i < tokens.size(); i++) {
                 ArgsEditorModel.Token token = tokens.get(i);
                 if (!token.isEditable()) continue;
-                addLabel(token.key(), 0, row, 1, false);
+                JLabel label = addLabel(ArgsEditorModel.displayLabel(token), 0, row, 1, false);
+                String hint = ArgsEditorModel.unitHint(token);
+                if (hint.length() > 0) label.setToolTipText(hint);
                 JTextField field = new JTextField(token.value(),
                         Math.max(8, Math.min(24, token.value().length() + 4)));
+                if (hint.length() > 0) field.setToolTipText(hint);
                 fields.add(new FieldBinding(token, field));
                 addField(field, 1, row);
                 row++;
@@ -78,7 +84,7 @@ final class StepEditorDialog {
         return ArgsEditorModel.render(tokens);
     }
 
-    private void addLabel(String text, int x, int y, int width, boolean header) {
+    private JLabel addLabel(String text, int x, int y, int width, boolean header) {
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.gridx = x;
         gbc.gridy = y;
@@ -88,6 +94,12 @@ final class StepEditorDialog {
         JLabel label = new JLabel(text == null ? "" : text);
         if (header) label.setFont(label.getFont().deriveFont(java.awt.Font.BOLD));
         panel.add(label, gbc);
+        return label;
+    }
+
+    private void addHint(String text, int x, int y, int width) {
+        JLabel hint = addLabel(text, x, y, width, false);
+        hint.setForeground(new java.awt.Color(80, 80, 80));
     }
 
     private void addField(JTextField field, int x, int y) {

@@ -199,7 +199,7 @@ public final class SandboxDialog extends JDialog {
         canvasScroll.setBorder(BorderFactory.createEmptyBorder());
         canvasScroll.setMinimumSize(new Dimension(360, 1));
 
-        JLabel intro = new JLabel("Use the + buttons in grouped steps, or pick a step and click '+ Add step' on a branch.");
+        JLabel intro = new JLabel("Use the + buttons or double-click grouped steps, or pick a step and click '+ Add step' on a branch.");
         intro.setOpaque(true);
         intro.setBackground(new Color(232, 244, 252));
         intro.setBorder(BorderFactory.createCompoundBorder(
@@ -288,10 +288,11 @@ public final class SandboxDialog extends JDialog {
     private void showSandboxHelp() {
         String msg = "<html><body style='width:380px;'>"
                 + "Build the channel's custom filter as a chain of steps. Use the "
-                + "<b>+</b> buttons in the grouped step boxes to add commands to the "
-                + "selected branch, or pick a step and click <b>+ Add step</b> on a "
+                + "<b>+</b> buttons or double-click rows in the grouped step boxes to add "
+                + "commands to the selected branch, or pick a step and click <b>+ Add step</b> on a "
                 + "branch. Double-click or right-click a step in <b>Your filter</b> "
-                + "to edit its settings. Ctrl-click or Shift-click branches, then use "
+                + "to edit its settings. Spatial settings are labelled as pixels, not microns. "
+                + "Ctrl-click or Shift-click branches, then use "
                 + "<b>Merge selected branches</b>. Double-click or right-click a merge "
                 + "card to edit how branches combine."
                 + "<br><br>"
@@ -601,7 +602,7 @@ public final class SandboxDialog extends JDialog {
             return false;
         }
         if (!entry.legacy) {
-            model.addNode(line, entry);
+            editNewNodeParameters(model.addNode(line, entry));
             return true;
         }
         if (previewHandler == null) {
@@ -619,7 +620,7 @@ public final class SandboxDialog extends JDialog {
                 }
                 return false;
             }
-            model.addNode(line, entry, probe.optionsString);
+            editNewNodeParameters(model.addNode(line, entry, probe.optionsString));
             return true;
         } catch (Exception ex) {
             IJ.showMessage("Fiji Command", "Command was not added:\n" + ex.getMessage());
@@ -627,6 +628,13 @@ public final class SandboxDialog extends JDialog {
         } finally {
             if (previewHandler != null) previewHandler.close(source);
         }
+    }
+
+    private void editNewNodeParameters(SandboxModel.Node node) {
+        if (node == null) return;
+        model.selectNode(node);
+        StepEditorDialog.show(this, node);
+        refreshEditors();
     }
 
     private void close() {

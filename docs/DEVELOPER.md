@@ -12,7 +12,7 @@ Do not add project-specific importers, channel naming setup, bin analysis setup,
 src/main/java/macro/builder/Macro_Builder.java       Launcher and session UI
 src/main/java/macro/builder/Macro_Builder_Batch_Count.java
                                                         Fiji command used by exported batch count macros
-src/main/java/macro/builder/analysis/                Count shootout models, thresholding, object counting, batch CSV, and batch macro export
+src/main/java/macro/builder/analysis/                Count shootout models, thresholding, object counting, macro-output batch runs, batch CSV, and batch macro export
 src/main/java/macro/builder/ui/                      Swing dialogs and UI helpers
 src/main/java/macro/builder/ui/sandbox/              Visual builder UI
 src/main/java/macro/builder/image/                   Macro loading, parsing, and execution
@@ -85,7 +85,29 @@ The jar name intentionally contains an underscore (`Macro_Builder-...jar`) becau
 
 The plugin opens ordinary image files with `IJ.openImage`. Known microscope container files and selected directories go straight to Fiji's `Bio-Formats Importer` command by name, with only the `open=[path]` option, so Bio-Formats can show its native series/image chooser. If Bio-Formats opens more than one image window, Macro Builder asks which imported image should become the selected source and closes the other imported images.
 
-Keep Bio-Formats optional unless a future change truly needs compile-time Bio-Formats APIs. A normal Fiji installation already provides Bio-Formats at runtime.
+`Run as batch...` container mode uses `BioFormatsSeriesProvider` to list and open selected series without adding a compile-time Bio-Formats dependency. The provider checks for `loci.formats.ImageReader`, `loci.plugins.BF`, and `loci.plugins.in.ImporterOptions` by reflection. If those classes are missing, users get a plain Bio-Formats availability message instead of a leaked `ClassNotFoundException`.
+
+Keep Bio-Formats optional unless a future change truly needs compile-time Bio-Formats APIs. A normal Fiji installation already provides Bio-Formats at runtime. If a future provided-scope Bio-Formats dependency is added, confirm that the built plugin jar still does not bundle Bio-Formats classes.
+
+## Macro Output Batch Runs
+
+Direct macro-output batch runs are started from `Loaded Macro` > `Run as batch...` and live in these classes:
+
+- `BatchMacroScanner` scans ordinary image folders with a full-filename regular expression and returns `BatchMacroInput.file(...)` rows.
+- `BatchMacroInput` stores either an ordinary file row or a selected Bio-Formats container-series row.
+- `BioFormatsSeriesProvider` lists container series metadata and opens one selected series at a time.
+- `BatchMacroRunner` opens each selected input independently, runs the loaded macro through `FilterExecutor.runThreadSafe(...)`, saves TIFF output, appends status data for the CSV, and closes temporary images.
+- `BatchMacroDialog` is the Swing dialog for folder preview, container-series preview, row ticking, output folder selection, progress, and cancel-after-current-input behavior.
+
+Folder regex matching uses `Matcher.matches()`, so the regex must match the whole filename. Keep this behavior in sync with the user guide. Recursive folder runs preserve relative subfolder paths in the output folder and append `_MacroBuilder.tif` to output names. Container outputs use the source container basename plus a one-based `_sNNN` series suffix and sanitized series name when present. The CSV columns are:
+
+```text
+source,kind,series_index,series_name,width,height,channels,slices,frames,output,status,error
+```
+
+The stored `series_index` is the zero-based Bio-Formats index used to reopen the series. User-facing labels may display one-based series numbers.
+
+Cancellation is cooperative. `BatchMacroDialog` asks the runner to stop before the next input; it should not interrupt a macro already running inside ImageJ.
 
 ## Count Testing
 
@@ -101,7 +123,7 @@ Fixed numeric thresholds must use the processed macro output's native intensity 
 
 Run count analysis on duplicates only. `ThresholdShootoutRunner`, preview actions, selected-row mask previews, and batch runs must not mutate the selected source image.
 
-Batch count mode intentionally supports ordinary image files first. Bio-Formats containers are listed during selection but skipped by `BatchShootoutRunner` with a CSV error row, because container series selection is interactive and belongs in single-image opening.
+Batch count mode intentionally supports ordinary image files first. Bio-Formats containers are listed during selection but skipped by `BatchShootoutRunner` with a CSV error row. Keep this count-testing batch path separate from `Run as batch...`, which can process selected Bio-Formats container series and saves processed TIFF images.
 
 ## Regression Tests
 
@@ -113,6 +135,7 @@ Current automated tests cover:
 - Native `2D particles` and `3D stack objects` counting.
 - Single-image threshold shootouts, including native-scale fixed thresholds.
 - Batch count CSV behavior and window cleanup.
+- Macro-output batch folder scanning, TIFF saving, CSV output, duplicate source preservation, dialog table selection, validation helpers, container output naming, and missing Bio-Formats runtime messages.
 - Batch macro export and `Macro Builder Batch Count` settings round-tripping.
 
 Run them before every release:

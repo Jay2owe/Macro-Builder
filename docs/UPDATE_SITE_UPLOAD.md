@@ -56,12 +56,18 @@ Restart Fiji and verify:
 - `Save macro...` writes an `.ijm` file.
 - Visual-builder macros also write a `.dag.json` sidecar.
 - `Run macro on selected image` runs on a duplicate, not the source image.
+- `Run as batch...` folder mode previews at least two ordinary TIFF or PNG files from a filename regex, lets you untick a row, and saves only ticked TIFF outputs plus `Macro_Builder_Batch_Run.csv`.
+- `Run as batch...` folder mode reports an invalid filename regex clearly and does not start a run.
+- `Run as batch...` cancellation changes the status and stops before starting the next input.
+- `Run as batch...` leaves the selected source image unchanged after a folder batch run.
+- `Run as batch...` container mode lists series from a real Bio-Formats container, lets you tick one series and untick another, saves only ticked TIFF outputs, and records series index/name in `Macro_Builder_Batch_Run.csv`.
+- `Run as batch...` container mode closes temporary Bio-Formats images after the run.
 - `Test counts...` opens after a macro is built or recorded.
 - `Test counts...` can run `2D particles` with `Auto threshold shootout`.
 - `Test counts...` can run `3D stack objects` on a stack with `Fixed numeric threshold`.
 - Fixed numeric thresholds use the processed macro output's native intensity scale; on a 16-bit processed image, `2000` means intensity `2000`, not a `0-255` remap.
 - `Export CSV...` writes the single-image count table.
-- `Run batch...` writes a batch count CSV for at least two ordinary image files.
+- `Test counts...` > `Run batch...` writes a batch count CSV for at least two ordinary image files.
 - `Save batch macro...` writes a wrapper `.ijm`, `_Filter.ijm`, and `.settings.json`, and the wrapper produces a CSV when run on a tiny folder.
 - The source image remains unchanged after preview, run, count testing, mask preview, batch testing, and saved batch macro checks.
 - A microscope container format opens through Bio-Formats if you have a test file.

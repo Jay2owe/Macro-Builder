@@ -90,6 +90,13 @@ If a manual container file is not available, record that explicitly:
 Manual Bio-Formats container smoke test not run: no local test container available.
 ```
 
+## Completion notes
+
+- Documentation updated in `README.md`, `docs/USER_GUIDE.md`, `docs/DEVELOPER.md`, and `docs/UPDATE_SITE_UPLOAD.md`.
+- Automated check run on 2026-05-08: `.\mvnw.cmd test "-Denforcer.skip=true"` finished with `BUILD SUCCESS`; Maven reported `185` tests, `0` failures, `0` test errors, and `0` skipped. JaCoCo printed JDK class instrumentation exceptions under the current Java runtime, but Maven exited successfully. The first unquoted PowerShell attempt split the Maven property and failed before tests started; the quoted command is the usable Windows form.
+- Manual Fiji folder-mode smoke test not run in this non-interactive worker session. The update-site checklist now records the required folder regex, invalid regex, cancel, TIFF output, CSV, and selected-source-unchanged checks.
+- Manual Bio-Formats container smoke test not run in this non-interactive worker session. The update-site checklist now records the required real-container series listing, tick/untick, TIFF output, CSV series metadata, and temporary-window cleanup checks.
+
 ## Exit gate
 
 1. `.\mvnw.cmd test "-Denforcer.skip=true"` passes.

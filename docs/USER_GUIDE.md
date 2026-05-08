@@ -51,13 +51,28 @@ Choose a macro from `Load Saved Macro` to load its macro text. Macro Builder als
 
 The `Loaded Macro` column is enabled after a macro has been built, recorded, or loaded.
 
-- `Run as batch...` currently shows a message directing you to `Test Counts...` > `Run batch...`.
+- `Run as batch...` runs the loaded macro on selected batch inputs and saves processed TIFF images plus a CSV summary.
 - `Save as batch macro...` exports a batch count wrapper for the current macro and latest count settings.
 - `Edit Macro...` opens the visual builder using the current macro.
 - `Create Macro Variations...` is a placeholder and is not implemented yet.
 - `Test Counts...` opens a count-testing dialog for the current macro and selected source image.
 
 The source image is not modified by count testing.
+
+## Run Macro Outputs In Batch
+
+Use `Run as batch...` when you want to apply the loaded macro itself to many inputs and save processed images. This is separate from `Test Counts...` > `Run batch...`, which runs count validation and writes count rows instead of saving processed macro-output images.
+
+The batch dialog has two input modes:
+
+- Folder mode scans an ordinary image folder. Choose an input folder, enter a filename regular expression, choose whether to include subfolders, then click `Preview`. The regular expression must match the whole filename. For example, `(?i).*_DAPI\.tif` matches `Sample1_DAPI.tif`, and `(?i).*\.(tif|tiff|png)` matches common TIFF and PNG names.
+- Container mode lists images inside one Bio-Formats microscope container. Choose a `.lif`, `.czi`, `.nd2`, or similar container file, click `List series`, then tick only the series/images you want to process. This requires Fiji's Bio-Formats plugin at runtime.
+
+Previewed rows are ticked by default. Untick rows you do not want, choose an output folder, then click `Run`. `Cancel batch` stops before the next input; it does not interrupt the macro currently running on an image.
+
+Successful file rows are saved as TIFF files with `_MacroBuilder.tif` appended to the source name. Recursive folder runs preserve matching subfolder paths under the output folder. Container rows are saved with the container name, one-based series number, optional series name, and `_MacroBuilder.tif`. The dialog also writes `Macro_Builder_Batch_Run.csv` with one row per attempted input, including the source, input kind, container series index/name when relevant, output path, status, and error message.
+
+Macro Builder opens each batch input independently and closes its temporary image after saving or failure. The selected source image in the main Macro Builder window is not used as a batch input unless you also select that file in the batch dialog.
 
 ## Test Counts
 
@@ -82,7 +97,7 @@ Click `Export CSV...` to save the current single-image count table.
 
 ## Batch Count Testing
 
-In the `Test Counts` dialog, click `Run batch...` to run the same macro and count settings on selected image files or a selected folder. The batch run writes a CSV file with one row per input file and threshold variant. The CSV includes file metadata, count settings, threshold value, count, mean size, coverage, macro output range, status, and any error message.
+In the `Test Counts` dialog, click `Run batch...` to run the same macro and count settings on selected image files or a selected folder. This is a count-validation workflow, not the macro-output TIFF workflow above. The batch run writes a CSV file with one row per input file and threshold variant. The CSV includes file metadata, count settings, threshold value, count, mean size, coverage, macro output range, status, and any error message.
 
 Batch count testing supports ordinary image files such as TIFF, PNG, JPEG, GIF, BMP, ICS, and IDS. Bio-Formats containers are skipped in batch mode; open those files individually first if you need the Bio-Formats series chooser.
 

@@ -1,6 +1,6 @@
 # Macro Builder
 
-Macro Builder is a standalone Fiji/ImageJ plugin for building ImageJ macro (`.ijm`) filter steps from one image, stack, or multichannel hyperstack. It opens from `Plugins > Macro Builder > Macro Builder` and provides a small desktop UI for selecting an open Fiji image or opening a single image, folder, stack, or microscope container from disk. For multichannel hyperstacks, choose the primary channel to process, then optionally use parallel branches from other channels to subtract, mask, or combine signals. After building a filter macro, users can test object counts with threshold shootouts, export count results to CSV, and save a batch count macro for ordinary image folders.
+Macro Builder is a standalone Fiji/ImageJ plugin for building ImageJ macro (`.ijm`) filter steps from one image, stack, or multichannel hyperstack. It opens from `Plugins > Macro Builder > Macro Builder` and provides a small desktop UI for selecting an open Fiji image or opening a single image, folder, stack, or microscope container from disk. For multichannel hyperstacks, choose the primary channel to process, then optionally use parallel branches from other channels to subtract, mask, or combine signals. After building or loading a filter macro, users can run that macro across selected files or Bio-Formats container series and save TIFF outputs with a CSV summary. Separately, users can test object counts with threshold shootouts, export count results to CSV, and save a batch count macro for ordinary image folders.
 
 The plugin is intentionally standalone. It does not include a bin-analysis importer, channel setup workflow, batch import workflow, or any project-specific analysis setup.
 
@@ -27,8 +27,9 @@ After restart, launch the plugin from `Plugins > Macro Builder > Macro Builder`.
 1. Use `Use current Fiji image`, `Open Image/Container`, or `Open Last Image/Container` to select the source image.
 2. Use `Build Macro` to build a visual filter pipeline, or `Macro Recorder` to record ImageJ macro actions.
 3. Use `Load Saved Macro` to load a previously saved macro into the `Loaded Macro` panel.
-4. Use `Test Counts...` to compare threshold methods and count `2D particles` or `3D stack objects` from the processed macro output.
-5. Use `Save as batch macro...` to export a wrapper macro and settings for batch count runs.
+4. Use `Run as batch...` to apply the loaded macro to selected ordinary image files or selected series inside one Bio-Formats microscope container, saving TIFF outputs and `Macro_Builder_Batch_Run.csv`.
+5. Use `Test Counts...` to compare threshold methods and count `2D particles` or `3D stack objects` from the processed macro output.
+6. Use `Save as batch macro...` to export a wrapper macro and settings for batch count runs.
 
 In `Build Macro`, steps are grouped by command type. Use the row `+` buttons to add commands, double-click or right-click sandbox steps to edit their parameters, preview selected or full results in the embedded preview pane, and Ctrl-click or Shift-click branches before `Merge selected branches`.
 

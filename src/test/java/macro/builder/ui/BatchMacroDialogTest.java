@@ -69,6 +69,20 @@ public class BatchMacroDialogTest {
     }
 
     @Test
+    public void inputTableModelDisplaysContainerSeriesRows() throws Exception {
+        File container = touch(temporaryFolder.newFile("sample.lif"));
+
+        BatchMacroDialog.InputTableModel model = new BatchMacroDialog.InputTableModel();
+        model.setInputs(Arrays.asList(
+                BatchMacroInput.containerSeries(container, 2, "DAPI", 512, 256, 3, 4, 5)), true);
+
+        assertEquals("Series 3: DAPI", model.getValueAt(0, 1));
+        assertEquals("sample.lif", model.getValueAt(0, 2));
+        assertEquals("Bio-Formats", model.getValueAt(0, 3));
+        assertEquals("512 x 256, C=3, Z=4, T=5", model.getValueAt(0, 4));
+    }
+
+    @Test
     public void folderValidationRejectsMissingInputAndFileOutput() throws Exception {
         File input = temporaryFolder.newFolder("real-input");
         File notFolder = temporaryFolder.newFile("not-a-folder.txt");
@@ -90,6 +104,21 @@ public class BatchMacroDialogTest {
             fail("Expected output folder validation failure");
         } catch (IllegalArgumentException expected) {
             assertTrue(expected.getMessage().contains("Output path"));
+        }
+    }
+
+    @Test
+    public void containerValidationRejectsMissingFile() throws Exception {
+        File container = temporaryFolder.newFile("sample.lif");
+        assertEquals(container.getAbsoluteFile(),
+                BatchMacroDialog.containerFileFromText(container.getAbsolutePath()));
+
+        try {
+            BatchMacroDialog.containerFileFromText(
+                    new File(temporaryFolder.getRoot(), "missing.lif").getAbsolutePath());
+            fail("Expected container file validation failure");
+        } catch (IllegalArgumentException expected) {
+            assertTrue(expected.getMessage().contains("Container file"));
         }
     }
 

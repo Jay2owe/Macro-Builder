@@ -5,6 +5,7 @@ import macro.builder.analysis.BatchMacroInput;
 import macro.builder.analysis.BatchMacroResult;
 import macro.builder.analysis.BatchMacroRunner;
 import macro.builder.analysis.BatchMacroScanner;
+import macro.builder.image.BioFormatsSeriesProvider;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
@@ -23,6 +24,7 @@ import javax.swing.SwingWorker;
 import javax.swing.WindowConstants;
 import javax.swing.table.AbstractTableModel;
 import javax.swing.table.TableColumnModel;
+import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.BorderLayout;
 import java.awt.Dialog;
 import java.awt.Dimension;
@@ -50,21 +52,29 @@ public final class BatchMacroDialog {
     public static final String DEFAULT_FILENAME_REGEX =
             "(?i).*\\.(tif|tiff|png|jpg|jpeg|gif|bmp|ics|ids)";
     public static final String DEFAULT_CSV_NAME = "Macro_Builder_Batch_Run.csv";
+    private static final String[] BIO_FORMATS_CONTAINER_EXTENSIONS = {
+            "lif", "czi", "nd2", "oib", "oif", "lsm", "zvi", "ome",
+            "ims", "vsi", "lei", "mvd2", "mrxs", "svs", "scn", "tif", "tiff"
+    };
 
     private final String macro;
     private final JDialog dialog;
+    private final BioFormatsSeriesProvider seriesProvider = new BioFormatsSeriesProvider();
     private final JTextField folderField = new JTextField(32);
     private final JTextField regexField = new JTextField(DEFAULT_FILENAME_REGEX, 32);
     private final JCheckBox recursive = new JCheckBox("Include subfolders", true);
+    private final JTextField containerField = new JTextField(32);
     private final JTextField outputField = new JTextField(32);
     private final InputTableModel tableModel = new InputTableModel();
     private final JTable table = new JTable(tableModel);
-    private final JLabel statusLabel = new JLabel("Choose an input folder, then preview matching files.");
+    private final JLabel statusLabel = new JLabel("Choose an input folder or container, then preview rows.");
     private final JProgressBar progressBar = new JProgressBar(0, 100);
     private final JButton folderButton = new JButton("Choose...");
     private final JButton previewButton = new JButton("Preview");
     private final JButton selectAllButton = new JButton("Select all");
     private final JButton selectNoneButton = new JButton("Select none");
+    private final JButton containerButton = new JButton("Choose...");
+    private final JButton listSeriesButton = new JButton("List series");
     private final JButton outputButton = new JButton("Choose...");
     private final JButton runButton = new JButton("Run");
     private final JButton cancelButton = new JButton("Cancel batch");
@@ -102,7 +112,7 @@ public final class BatchMacroDialog {
         JPanel settings = new JPanel(new GridBagLayout());
         settings.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createEmptyBorder(10, 12, 0, 12),
-                BorderFactory.createTitledBorder("Folder mode")));
+                BorderFactory.createTitledBorder("Batch input")));
 
         int row = 0;
         addPathRow(settings, row++, "Input folder:", folderField, folderButton);
@@ -114,6 +124,10 @@ public final class BatchMacroDialog {
         previewPanel.add(selectAllButton);
         previewPanel.add(selectNoneButton);
         addSettingRow(settings, row++, "", previewPanel);
+        addPathRow(settings, row++, "Container file:", containerField, containerButton);
+        JPanel containerPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        containerPanel.add(listSeriesButton);
+        addSettingRow(settings, row++, "", containerPanel);
         addPathRow(settings, row, "Output folder:", outputField, outputButton);
         dialog.add(settings, BorderLayout.NORTH);
 
@@ -124,7 +138,7 @@ public final class BatchMacroDialog {
         JScrollPane scroll = new JScrollPane(table);
         scroll.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createEmptyBorder(0, 12, 0, 12),
-                BorderFactory.createTitledBorder("Matching files")));
+                BorderFactory.createTitledBorder("Batch inputs")));
         dialog.add(scroll, BorderLayout.CENTER);
 
         JPanel footer = new JPanel(new BorderLayout());
@@ -150,6 +164,11 @@ public final class BatchMacroDialog {
                 chooseFolder(folderField, "Choose Input Folder");
             }
         });
+        containerButton.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                chooseContainerFile();
+            }
+        });
         outputButton.addActionListener(new ActionListener() {
             @Override public void actionPerformed(ActionEvent e) {
                 chooseFolder(outputField, "Choose Output Folder");
@@ -158,6 +177,11 @@ public final class BatchMacroDialog {
         previewButton.addActionListener(new ActionListener() {
             @Override public void actionPerformed(ActionEvent e) {
                 previewInputs();
+            }
+        });
+        listSeriesButton.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                previewContainerSeries();
             }
         });
         selectAllButton.addActionListener(new ActionListener() {
@@ -271,6 +295,25 @@ public final class BatchMacroDialog {
         }
     }
 
+    private void chooseContainerFile() {
+        JFileChooser chooser = new JFileChooser();
+        chooser.setDialogTitle("Choose Bio-Formats Container");
+        chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
+        chooser.addChoosableFileFilter(new FileNameExtensionFilter(
+                "Bio-Formats containers", BIO_FORMATS_CONTAINER_EXTENSIONS));
+        File current = currentDirectory(containerField.getText());
+        if (current != null) {
+            chooser.setCurrentDirectory(current);
+        }
+        if (chooser.showOpenDialog(dialog) == JFileChooser.APPROVE_OPTION) {
+            File selected = chooser.getSelectedFile();
+            if (selected != null) {
+                containerField.setText(selected.getAbsolutePath());
+                updateControlState();
+            }
+        }
+    }
+
     private void previewInputs() {
         if (isBusy()) return;
 
@@ -298,6 +341,32 @@ public final class BatchMacroDialog {
         }
     }
 
+    private void previewContainerSeries() {
+        if (isBusy()) return;
+
+        final File container;
+        try {
+            container = containerFileFromText(containerField.getText());
+        } catch (IllegalArgumentException ex) {
+            IJ.showMessage("Run as Batch", cleanMessage(ex));
+            return;
+        }
+
+        try {
+            List<BatchMacroInput> inputs = seriesProvider.listSeries(container);
+            tableModel.setInputs(inputs, true);
+            statusLabel.setText(inputs.size() + " image series found in " + container.getName() + ".");
+            setProgressValue(0, "Container preview ready.");
+            updateControlState();
+        } catch (RuntimeException ex) {
+            tableModel.setInputs(Collections.<BatchMacroInput>emptyList(), false);
+            IJ.showMessage("Run as Batch", cleanMessage(ex));
+            statusLabel.setText("Could not list container series.");
+            setProgressValue(0, "Preview failed.");
+            updateControlState();
+        }
+    }
+
     private void runBatch() {
         if (isBusy()) return;
         if (macro.trim().isEmpty()) {
@@ -307,7 +376,7 @@ public final class BatchMacroDialog {
 
         final List<BatchMacroInput> selected = tableModel.selectedInputs();
         if (selected.isEmpty()) {
-            IJ.showMessage("Run as Batch", "Tick at least one file to run.");
+            IJ.showMessage("Run as Batch", "Tick at least one file or container series to run.");
             return;
         }
 
@@ -332,8 +401,8 @@ public final class BatchMacroDialog {
                         new BatchMacroRunner.Progress() {
                             @Override public void onStarted(int totalItems) {
                                 setBatchProgress(0, totalItems,
-                                        "Batch run: " + totalItems + " file(s).");
-                                setBatchStatus("Batch run: " + totalItems + " file(s).");
+                                        "Batch run: " + totalItems + " item(s).");
+                                setBatchStatus("Batch run: " + totalItems + " item(s).");
                             }
 
                             @Override public void onItemStarted(
@@ -342,9 +411,9 @@ public final class BatchMacroDialog {
                                     int totalItems) {
                                 setBatchProgress(index - 1, totalItems,
                                         "Batch " + index + "/" + totalItems + ": "
-                                                + input.file.getName());
+                                                + inputDisplayName(input));
                                 setBatchStatus("Batch " + index + "/" + totalItems + ": "
-                                        + input.file.getName());
+                                        + inputDisplayName(input));
                             }
 
                             @Override public void onItemProgress(
@@ -483,6 +552,9 @@ public final class BatchMacroDialog {
         regexField.setEnabled(!busy);
         recursive.setEnabled(!busy);
         previewButton.setEnabled(!busy);
+        containerField.setEnabled(!busy);
+        containerButton.setEnabled(!busy);
+        listSeriesButton.setEnabled(!busy);
         selectAllButton.setEnabled(!busy && tableModel.getRowCount() > 0);
         selectNoneButton.setEnabled(!busy && tableModel.getRowCount() > 0);
         outputField.setEnabled(!busy);
@@ -503,6 +575,15 @@ public final class BatchMacroDialog {
                     + folder.getAbsolutePath());
         }
         return folder;
+    }
+
+    static File containerFileFromText(String text) {
+        File file = fileFromText(text, "Choose a container file.");
+        if (!file.isFile()) {
+            throw new IllegalArgumentException("Container file does not exist: "
+                    + file.getAbsolutePath());
+        }
+        return file;
     }
 
     static File outputFolderFromText(String text) {
@@ -537,6 +618,18 @@ public final class BatchMacroDialog {
         return result.status.name().toLowerCase(Locale.ROOT);
     }
 
+    private static String inputDisplayName(BatchMacroInput input) {
+        if (input == null) return "";
+        if (input.kind == BatchMacroInput.Kind.CONTAINER_SERIES) {
+            String label = "Series " + (input.seriesIndex + 1);
+            if (input.seriesName != null && input.seriesName.trim().length() > 0) {
+                label += ": " + input.seriesName.trim();
+            }
+            return label + " from " + input.file.getName();
+        }
+        return input.file.getName();
+    }
+
     private static String cleanMessage(Throwable ex) {
         if (ex == null) return "Unknown error";
         String message = ex.getMessage();
@@ -564,7 +657,7 @@ public final class BatchMacroDialog {
     }
 
     static final class InputTableModel extends AbstractTableModel {
-        private static final String[] COLUMNS = new String[]{"Run", "File", "Folder", "Type", "Size"};
+        private static final String[] COLUMNS = new String[]{"Run", "Input", "Location", "Type", "Size"};
 
         private List<BatchMacroInput> inputs = Collections.emptyList();
         private List<Boolean> selected = Collections.emptyList();
@@ -639,12 +732,22 @@ public final class BatchMacroDialog {
         }
 
         private static String fileDisplay(BatchMacroInput input) {
+            if (input != null && input.kind == BatchMacroInput.Kind.CONTAINER_SERIES) {
+                String label = "Series " + (input.seriesIndex + 1);
+                if (input.seriesName != null && input.seriesName.trim().length() > 0) {
+                    label += ": " + input.seriesName.trim();
+                }
+                return label;
+            }
             String relative = normalizedRelativePath(input);
             int slash = relative.lastIndexOf('/');
             return slash < 0 ? relative : relative.substring(slash + 1);
         }
 
         private static String folderDisplay(BatchMacroInput input) {
+            if (input != null && input.kind == BatchMacroInput.Kind.CONTAINER_SERIES) {
+                return input.file == null ? "" : input.file.getName();
+            }
             String relative = normalizedRelativePath(input);
             int slash = relative.lastIndexOf('/');
             return slash < 0 ? "" : relative.substring(0, slash);
@@ -653,7 +756,7 @@ public final class BatchMacroDialog {
         private static String typeDisplay(BatchMacroInput input) {
             if (input == null) return "";
             if (input.kind == BatchMacroInput.Kind.CONTAINER_SERIES) {
-                return "Series";
+                return "Bio-Formats";
             }
             String extension = extension(input.file == null ? "" : input.file.getName());
             return extension.toUpperCase(Locale.ROOT);
@@ -666,7 +769,10 @@ public final class BatchMacroDialog {
             if (input.width <= 0 || input.height <= 0) {
                 return "";
             }
-            return input.width + " x " + input.height;
+            return input.width + " x " + input.height
+                    + ", C=" + Math.max(1, input.channels)
+                    + ", Z=" + Math.max(1, input.slices)
+                    + ", T=" + Math.max(1, input.frames);
         }
 
         private static String normalizedRelativePath(BatchMacroInput input) {

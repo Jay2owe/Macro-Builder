@@ -3,6 +3,7 @@ package macro.builder.analysis;
 import ij.IJ;
 import ij.ImagePlus;
 import ij.io.FileSaver;
+import macro.builder.image.BioFormatsSeriesProvider;
 import macro.builder.image.FilterExecutor;
 
 import java.io.File;
@@ -13,12 +14,26 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 
 public final class BatchMacroRunner {
 
     private static final String OUTPUT_SUFFIX = "_MacroBuilder";
     private static final String TIFF_EXTENSION = ".tif";
+
+    private final BioFormatsSeriesProvider seriesProvider;
+
+    public BatchMacroRunner() {
+        this(new BioFormatsSeriesProvider());
+    }
+
+    BatchMacroRunner(BioFormatsSeriesProvider seriesProvider) {
+        if (seriesProvider == null) {
+            throw new IllegalArgumentException("seriesProvider must not be null");
+        }
+        this.seriesProvider = seriesProvider;
+    }
 
     public interface Progress {
         void onStarted(int totalItems);
@@ -119,22 +134,26 @@ public final class BatchMacroRunner {
             final Progress progress,
             final int index,
             final int totalItems) {
-        if (input.kind != BatchMacroInput.Kind.FILE) {
-            return BatchMacroResult.failed(input,
-                    "Container-series inputs are not supported by this runner yet.");
-        }
-        if (!input.file.isFile()) {
-            return BatchMacroResult.failed(input, "This batch item is not a file.");
-        }
-        if (!BatchMacroScanner.isDirectImageFile(input.file)) {
-            return BatchMacroResult.failed(input, "Unsupported image format for macro batch runs.");
+        if (input.kind == BatchMacroInput.Kind.FILE) {
+            if (!input.file.isFile()) {
+                return BatchMacroResult.failed(input, "This batch item is not a file.");
+            }
+            if (!BatchMacroScanner.isDirectImageFile(input.file)) {
+                return BatchMacroResult.failed(input, "Unsupported image format for macro batch runs.");
+            }
+        } else if (input.kind == BatchMacroInput.Kind.CONTAINER_SERIES) {
+            if (!input.file.isFile()) {
+                return BatchMacroResult.failed(input, "Container file does not exist.");
+            }
+        } else {
+            return BatchMacroResult.failed(input, "Unsupported batch input type.");
         }
 
         ImagePlus image = null;
         try {
-            image = IJ.openImage(input.file.getAbsolutePath());
+            image = openInput(input);
             if (image == null || image.getStack() == null || image.getStackSize() == 0) {
-                return BatchMacroResult.failed(input, "Fiji could not open this image file.");
+                return BatchMacroResult.failed(input, openFailureMessage(input));
             }
 
             progress.onItemProgress(input, index, totalItems, "Running macro...");
@@ -157,6 +176,13 @@ public final class BatchMacroRunner {
         } finally {
             closeImageQuietly(image);
         }
+    }
+
+    private ImagePlus openInput(BatchMacroInput input) {
+        if (input.kind == BatchMacroInput.Kind.CONTAINER_SERIES) {
+            return seriesProvider.openSeries(input);
+        }
+        return IJ.openImage(input.file.getAbsolutePath());
     }
 
     private static List<BatchMacroInput> nonNullInputs(List<BatchMacroInput> inputs) {
@@ -194,7 +220,10 @@ public final class BatchMacroRunner {
         return directory;
     }
 
-    private static File outputFileFor(BatchMacroInput input, File outputDirectory) {
+    static File outputFileFor(BatchMacroInput input, File outputDirectory) {
+        if (input.kind == BatchMacroInput.Kind.CONTAINER_SERIES) {
+            return containerOutputFileFor(input, outputDirectory);
+        }
         String relativePath = input.relativePath == null || input.relativePath.trim().isEmpty()
                 ? input.file.getName()
                 : input.relativePath;
@@ -208,6 +237,15 @@ public final class BatchMacroRunner {
                 ? input.file.getName()
                 : parts[parts.length - 1];
         return new File(folder, safeBaseName(sourceName) + OUTPUT_SUFFIX + TIFF_EXTENSION);
+    }
+
+    private static File containerOutputFileFor(BatchMacroInput input, File outputDirectory) {
+        String base = safeBaseName(input.file.getName());
+        String seriesPart = String.format(Locale.US, "_s%03d", input.seriesIndex + 1);
+        String namePart = input.seriesName == null || input.seriesName.trim().isEmpty()
+                ? ""
+                : "_" + safePathSegment(input.seriesName);
+        return new File(outputDirectory, base + seriesPart + namePart + OUTPUT_SUFFIX + TIFF_EXTENSION);
     }
 
     private static File uniqueOutputFile(File preferred, Set<String> usedOutputPaths) {
@@ -307,6 +345,13 @@ public final class BatchMacroRunner {
             return ex.getClass().getSimpleName();
         }
         return message.trim().replace('\n', ' ').replace('\r', ' ');
+    }
+
+    private static String openFailureMessage(BatchMacroInput input) {
+        if (input != null && input.kind == BatchMacroInput.Kind.CONTAINER_SERIES) {
+            return "Bio-Formats did not open the selected container series.";
+        }
+        return "Fiji could not open this image file.";
     }
 
     private static String positiveInteger(int value) {

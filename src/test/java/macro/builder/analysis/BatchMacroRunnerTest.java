@@ -109,9 +109,19 @@ public class BatchMacroRunnerTest {
         File source = temporaryFolder.newFile("csv-source.tif");
         File output = new File(temporaryFolder.getRoot(), "csv-output.tif");
         BatchMacroInput input = BatchMacroInput.file(source, "csv-source.tif");
+        BatchMacroInput container = BatchMacroInput.containerSeries(
+                temporaryFolder.newFile("sample.lif"),
+                2,
+                "DAPI",
+                512,
+                256,
+                3,
+                4,
+                5);
         List<BatchMacroResult> rows = Arrays.asList(
                 BatchMacroResult.success(input, output),
-                BatchMacroResult.failed(input, "bad, \"quoted\" error"));
+                BatchMacroResult.failed(input, "bad, \"quoted\" error"),
+                BatchMacroResult.failed(container, "Bio-Formats missing"));
 
         String csv = BatchMacroRunner.buildCsv(rows);
 
@@ -122,10 +132,40 @@ public class BatchMacroRunnerTest {
         assertTrue(csv.contains("SUCCESS"));
         assertTrue(csv.contains("FAILED"));
         assertTrue(csv.contains("\"bad, \"\"quoted\"\" error\""));
+        assertTrue(csv.contains("CONTAINER_SERIES,2,DAPI,512,256,3,4,5"));
 
         File csvFile = new File(temporaryFolder.newFolder("reports"), "summary.csv");
         BatchMacroRunner.writeCsv(csvFile, rows);
         assertEquals(csv, new String(Files.readAllBytes(csvFile.toPath()), StandardCharsets.UTF_8));
+    }
+
+    @Test
+    public void containerSeriesOutputNameUsesSeriesIndexAndName() throws Exception {
+        File container = temporaryFolder.newFile("sample.lif");
+        BatchMacroInput input = BatchMacroInput.containerSeries(
+                container, 2, "DAPI nucleus", 512, 256, 1, 1, 1);
+        File outputFolder = temporaryFolder.newFolder("container-output");
+
+        File output = BatchMacroRunner.outputFileFor(input, outputFolder);
+
+        assertEquals(new File(outputFolder, "sample_s003_DAPI_nucleus_MacroBuilder.tif"), output);
+    }
+
+    @Test
+    public void containerSeriesFailureIsReportedAsBatchRow() throws Exception {
+        File container = temporaryFolder.newFile("broken.lif");
+        Files.write(container.toPath(), "not a real container".getBytes(StandardCharsets.UTF_8));
+        BatchMacroInput input = BatchMacroInput.containerSeries(container, 0, "DAPI", 64, 32, 1, 1, 1);
+
+        List<BatchMacroResult> results = new BatchMacroRunner().run(
+                Collections.singletonList(input),
+                ADD_FIVE_MACRO,
+                temporaryFolder.newFolder("container-failure-output"),
+                null);
+
+        assertEquals(1, results.size());
+        assertEquals(BatchMacroResult.Status.FAILED, results.get(0).status);
+        assertTrue(results.get(0).error.contains("Bio-Formats"));
     }
 
     @Test

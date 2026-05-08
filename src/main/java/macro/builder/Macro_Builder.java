@@ -7,6 +7,7 @@ import macro.builder.image.FilterExecutor;
 import macro.builder.image.dag.DagIR;
 import macro.builder.image.dag.DagIRSerializer;
 import macro.builder.image.dag.IjmToDagLoader;
+import macro.builder.ui.BatchMacroDialog;
 import macro.builder.ui.MacroPreviewHandler;
 import macro.builder.ui.BioFormatsSeriesSelector;
 import macro.builder.ui.RecorderDialog;
@@ -270,7 +271,7 @@ public class Macro_Builder implements PlugIn {
             JButton edit = createMacroActionButton("Edit Macro...");
             JButton variations = createMacroActionButton("Create Macro Variations...");
             JButton counts = createMacroActionButton("Test Counts...");
-            run.addActionListener(e -> runAsBatchPlaceholder());
+            run.addActionListener(e -> runAsBatch());
             saveBatch.addActionListener(e -> saveBatchMacro());
             edit.addActionListener(e -> editCurrentMacro());
             variations.addActionListener(e -> createMacroVariationsPlaceholder());
@@ -607,10 +608,14 @@ public class Macro_Builder implements PlugIn {
             openSandbox();
         }
 
-        private void runAsBatchPlaceholder() {
+        private void runAsBatch() {
             if (!ensureMacroLoaded()) return;
-            IJ.showMessage("Macro Builder",
-                    "Run as batch is not implemented yet.\n\nUse Test Counts... > Run batch... for now.");
+            List<String> warnings = MacroBatchCompatibility.warnings(lastMacro);
+            if (!warnings.isEmpty() && !confirmBatchWarnings(warnings, "Run the batch anyway?")) {
+                return;
+            }
+            BatchMacroDialog.show(dialog, lastMacro);
+            setStatus("Opened batch runner.");
         }
 
         private void createMacroVariationsPlaceholder() {
@@ -832,12 +837,16 @@ public class Macro_Builder implements PlugIn {
         }
 
         private boolean confirmBatchWarnings(List<String> warnings) {
+            return confirmBatchWarnings(warnings, "Save the batch macro anyway?");
+        }
+
+        private boolean confirmBatchWarnings(List<String> warnings, String question) {
             StringBuilder message = new StringBuilder();
             message.append("This macro may not be safe for batch use:\n\n");
             for (String warning : warnings) {
                 message.append("- ").append(warning).append('\n');
             }
-            message.append("\nSave the batch macro anyway?");
+            message.append("\n").append(question);
             int choice = JOptionPane.showConfirmDialog(
                     dialog,
                     message.toString(),

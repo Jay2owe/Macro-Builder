@@ -47,6 +47,23 @@ public class FilterExecutorChannelDagTest {
         }
     }
 
+    @Test
+    public void duplicateChannelReturnsOneChannelHyperstackWithoutMovingSource() {
+        ImagePlus source = twoChannelHyperstack();
+        source.setPosition(2, 2, 2);
+
+        ImagePlus channel = FilterExecutor.duplicateChannel(source, 1, "primary");
+
+        assertEquals(2, source.getC());
+        assertEquals(2, source.getZ());
+        assertEquals(2, source.getT());
+        assertEquals(1, channel.getNChannels());
+        assertEquals(2, channel.getNSlices());
+        assertEquals(2, channel.getNFrames());
+        assertEquals(4, channel.getStackSize());
+        assertEquals(10.0f, channel.getStack().getProcessor(1).getf(0), 0.0001f);
+    }
+
     private static DagIR subtractDag(int firstChannel, int secondChannel) {
         return new DagIR(1,
                 1,

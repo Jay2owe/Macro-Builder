@@ -37,6 +37,9 @@ import java.util.concurrent.Future;
  */
 public final class VariantExecutor {
 
+    /** Keep variation generation responsive on desktop Fiji; each worker still creates large image outputs. */
+    static final int MAX_NATIVE_WORKERS = 2;
+
     private VariantExecutor() {}
 
     public static List<VariantResult> runAll(ImagePlus source,
@@ -84,7 +87,7 @@ public final class VariantExecutor {
                                                    List<VariantPlan> plans,
                                                    ProgressCallback progress) {
         final int total = plans.size();
-        int poolSize = Math.min(total, Math.max(1, Runtime.getRuntime().availableProcessors()));
+        int poolSize = nativeWorkerCount(total);
         ExecutorService exec = Executors.newFixedThreadPool(poolSize);
         try {
             List<Future<VariantResult>> futures = new ArrayList<Future<VariantResult>>(total);
@@ -122,16 +125,20 @@ public final class VariantExecutor {
     private static VariantResult runOne(ImagePlus source, VariantPlan plan, boolean holdLock) {
         long start = System.currentTimeMillis();
         if (holdLock) WindowManagerLock.LOCK.lock();
+        ImagePlus clone = null;
         try {
-            ImagePlus clone;
-            try {
-                clone = source.duplicate();
-            } catch (Throwable t) {
-                return new VariantResult(plan, null, t, System.currentTimeMillis() - start);
+            ImagePlus executionSource = source;
+            if (holdLock) {
+                try {
+                    clone = source.duplicate();
+                    executionSource = clone;
+                } catch (Throwable t) {
+                    return new VariantResult(plan, null, t, System.currentTimeMillis() - start);
+                }
             }
             ParallelContext.enterParallel();
             try {
-                ImagePlus output = FilterExecutor.runDagThreadSafe(clone, plan.dag);
+                ImagePlus output = FilterExecutor.runDagThreadSafe(executionSource, plan.dag);
                 if (output == null) {
                     return new VariantResult(plan, null,
                             new DagRejectedException("DAG produced no output"),
@@ -145,8 +152,15 @@ public final class VariantExecutor {
         } catch (Throwable t) {
             return new VariantResult(plan, null, t, System.currentTimeMillis() - start);
         } finally {
+            if (clone != null) clone.flush();
             if (holdLock) WindowManagerLock.LOCK.unlock();
         }
+    }
+
+    static int nativeWorkerCount(int totalPlans) {
+        if (totalPlans < 1) return 1;
+        int cores = Math.max(1, Runtime.getRuntime().availableProcessors());
+        return Math.max(1, Math.min(totalPlans, Math.min(MAX_NATIVE_WORKERS, cores)));
     }
 
     private static void notifyStart(final ProgressCallback progress, final int total) {

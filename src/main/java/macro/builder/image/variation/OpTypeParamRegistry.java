@@ -53,6 +53,17 @@ public final class OpTypeParamRegistry {
         m.put(OpType.MEDIAN, Collections.unmodifiableList(Arrays.asList(
                 new ParamSpec("Radius", "radius", 2.0, 1.0, 10.0, Scale.LINEAR, "px", false))));
 
+        // MINIMUM / MAXIMUM / VARIANCE - same RankFilters radius shape as
+        // Median/Mean, and all default to 2.0 in FilterExecutor.
+        m.put(OpType.MINIMUM, Collections.unmodifiableList(Arrays.asList(
+                new ParamSpec("Radius", "radius", 2.0, 1.0, 10.0, Scale.LINEAR, "px", false))));
+
+        m.put(OpType.MAXIMUM, Collections.unmodifiableList(Arrays.asList(
+                new ParamSpec("Radius", "radius", 2.0, 1.0, 10.0, Scale.LINEAR, "px", false))));
+
+        m.put(OpType.VARIANCE, Collections.unmodifiableList(Arrays.asList(
+                new ParamSpec("Radius", "radius", 2.0, 1.0, 10.0, Scale.LINEAR, "px", false))));
+
         // MEAN — radius defaults to 2.0 in FilterExecutor.
         m.put(OpType.MEAN, Collections.unmodifiableList(Arrays.asList(
                 new ParamSpec("Radius", "radius", 2.0, 1.0, 10.0, Scale.LINEAR, "px", false))));

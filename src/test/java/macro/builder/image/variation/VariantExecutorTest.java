@@ -72,95 +72,10 @@ public class VariantExecutorTest {
     }
 
     @Test
-    public void parallelSpeedupOnFourPlans() {
-        // Per stage 04 exit gate: 4 plans on 4+ cores must run in parallel
-        // wall-time < 2× a single plan's time.  With < 4 cores the plan count
-        // and ceiling scale together so the assertion still validates the
-        // qualitative claim "the pool actually parallelizes".
-        int cores = Runtime.getRuntime().availableProcessors();
-        int plansN = Math.min(4, cores);
-        // The workload is intentionally lightweight: a single Gaussian on a
-        // tiny 64×64×4 stack.  This keeps fixed overhead (thread-pool setup,
-        // ImagePlus.duplicate, JaCoCo coverage probes baked into ImageJ's
-        // blur path) much smaller than the parallel-speedup signal we care
-        // about.  Heavy workloads suffer cross-thread contention on the very
-        // hot blur1Direction loop which masks dispatch-level parallelism on
-        // some hosts.
-        final int width = 64;
-        final int height = 64;
-        final int slices = 4;
-        final double sigma = 4.0;
-        ImagePlus source = shortStack(width, height, slices);
-
-        // Warm up: run two parallel batches and a single before we time
-        // anything.  This lets the JIT compile blurGaussian in worker
-        // threads and primes any per-class JaCoCo data structures.
-        for (int i = 0; i < 3; i++) {
-            VariantExecutor.runAll(source, uniformBlurPlans(width, height, plansN, sigma), null);
-            VariantExecutor.runAll(source, uniformBlurPlans(width, height, 1, sigma), null);
-        }
-
-        // Best-of-many for both single and parallel timings: the workload is
-        // small (a few ms per task) so noise dominates without aggregation.
-        long singleNs = bestOf(11, source, uniformBlurPlans(width, height, 1, sigma));
-        long parallelNs = bestOf(11, source, uniformBlurPlans(width, height, plansN, sigma));
-
-        long singleMs = Math.max(1L, singleNs / 1_000_000L);
-        long parallelMs = parallelNs / 1_000_000L;
-
-        // Scale ceiling for hosts with fewer cores: with c cores running n plans,
-        // best case is ⌈n/c⌉ × single.
-        int batches = (plansN + cores - 1) / cores;
-        // Floor the ceiling so sub-millisecond noise doesn't false-fail.
-        long ceilingMs = Math.max(20L, batches * singleMs * 2L);
-        assertTrue("parallel " + parallelMs + "ms must be < " + ceilingMs
-                        + "ms (single=" + singleMs + "ms, cores=" + cores
-                        + ", plans=" + plansN + ", batches=" + batches + ")",
-                parallelMs < ceilingMs);
-
-        // Independent parallelism proof, robust to instrumentation overhead:
-        // sum of per-task elapsed times must materially exceed the batch wall
-        // time, otherwise the pool ran tasks back-to-back on one thread.
-        List<VariantResult> results = VariantExecutor.runAll(
-                source, uniformBlurPlans(width, height, plansN, sigma), null);
-        long sumElapsed = 0L;
-        for (VariantResult r : results) {
-            assertNull("error during overlap measurement: " + r.error, r.error);
-            sumElapsed += r.elapsedMillis;
-        }
-        // Total elapsed across N parallel tasks should be at least 1.5× the
-        // batch wall time when at least 2 tasks overlap.  Using the recorded
-        // (already-warm) parallelNs bound here would be circular, so re-time.
-        long t0 = System.nanoTime();
-        VariantExecutor.runAll(source, uniformBlurPlans(width, height, plansN, sigma), null);
-        long overlapWallMs = (System.nanoTime() - t0) / 1_000_000L;
-        // Slack the bound for very small wall times — tasks under 5 ms are
-        // dominated by thread-pool ramp and don't reliably show overlap.
-        if (overlapWallMs > 5L) {
-            assertTrue("expected overlap: sum(elapsed)=" + sumElapsed
-                            + "ms must exceed 1.2× wall=" + overlapWallMs + "ms",
-                    sumElapsed > overlapWallMs * 12L / 10L);
-        }
-    }
-
-    private static long bestOf(int trials, ImagePlus source, List<VariantPlan> plans) {
-        long best = Long.MAX_VALUE;
-        for (int i = 0; i < trials; i++) {
-            long t0 = System.nanoTime();
-            List<VariantResult> rs = VariantExecutor.runAll(source, plans, null);
-            long ns = System.nanoTime() - t0;
-            for (VariantResult r : rs) {
-                assertNull("unexpected error during timing run: " + r.error, r.error);
-            }
-            if (ns < best) best = ns;
-        }
-        return best;
-    }
-
-    private static List<VariantPlan> uniformBlurPlans(int w, int h, int n, double sigma) {
-        double[] sigmas = new double[n];
-        for (int i = 0; i < n; i++) sigmas[i] = sigma;
-        return blurPlans(w, h, sigmas);
+    public void nativeWorkerCountIsBoundedForDesktopResponsiveness() {
+        assertEquals(1, VariantExecutor.nativeWorkerCount(1));
+        assertTrue(VariantExecutor.nativeWorkerCount(2) <= VariantExecutor.MAX_NATIVE_WORKERS);
+        assertTrue(VariantExecutor.nativeWorkerCount(64) <= VariantExecutor.MAX_NATIVE_WORKERS);
     }
 
     @Test

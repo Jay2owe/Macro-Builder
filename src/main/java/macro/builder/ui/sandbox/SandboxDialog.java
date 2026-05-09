@@ -17,6 +17,7 @@ import macro.builder.ui.sandbox.variation.VariationSessionLog;
 import ij.IJ;
 import ij.ImagePlus;
 import ij.measure.Calibration;
+import ij.plugin.Duplicator;
 import ij.plugin.frame.Recorder;
 
 import javax.swing.BorderFactory;
@@ -478,14 +479,15 @@ public final class SandboxDialog extends JDialog {
             IJ.showMessage("Variations", "No source image is available for variation generation.");
             return;
         }
+        final DagIR variationDag = model.toDag();
         if (Recorder.record) {
             Recorder.recordString("// macro-builder variation: opened chooser\n");
         }
         VariationChooserDialog dialog = new VariationChooserDialog(
                 this,
-                model.toDag(),
+                variationDag,
                 source,
-                results -> onVariationResults(source, results));
+                results -> onVariationResults(sourceForVariationGrid(source, variationDag), results));
         dialog.setVisible(true);
     }
 
@@ -560,6 +562,28 @@ public final class SandboxDialog extends JDialog {
 
     private ImagePlus currentSourceDisplay() {
         return previewHandler == null ? null : previewHandler.getSourceForDisplay();
+    }
+
+    static ImagePlus sourceForVariationGrid(ImagePlus source, DagIR dag) {
+        if (source == null) return null;
+        int maxChannels = Math.max(1, source.getNChannels());
+        int channel = dag == null ? 1 : Math.max(1, Math.min(dag.primaryChannel, maxChannels));
+        int z = Math.max(1, source.getNSlices());
+        int t = Math.max(1, Math.min(source.getT(), Math.max(1, source.getNFrames())));
+        String title = sourceTitle(source) + "-C" + channel + "-T" + t;
+        try {
+            ImagePlus oneTimepoint = new Duplicator().run(source, channel, channel, 1, z, t, t);
+            if (oneTimepoint != null) {
+                oneTimepoint.setTitle(title);
+                return oneTimepoint;
+            }
+        } catch (RuntimeException ex) {
+        }
+        try {
+            return FilterExecutor.duplicateChannel(source, channel, title);
+        } catch (RuntimeException ex) {
+            return source;
+        }
     }
 
     private static int channelCount(ImagePlus image) {

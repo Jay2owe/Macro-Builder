@@ -21,6 +21,9 @@ public class OpTypeParamRegistryTest {
             OpType.GAUSSIAN_BLUR,
             OpType.MEDIAN,
             OpType.MEAN,
+            OpType.MINIMUM,
+            OpType.MAXIMUM,
+            OpType.VARIANCE,
             OpType.SUBTRACT_BACKGROUND,
             OpType.UNSHARP_MASK,
             OpType.GAUSSIAN_BLUR_3D,
@@ -205,6 +208,16 @@ public class OpTypeParamRegistryTest {
         assertEquals("x", specs.get(0).argKey);
         assertEquals("y", specs.get(1).argKey);
         assertEquals("z", specs.get(2).argKey);
+    }
+
+    @Test
+    public void rankFilterOpsExposeRadiusForSweeps() {
+        for (OpType type : Arrays.asList(OpType.MEDIAN, OpType.MEAN,
+                OpType.MINIMUM, OpType.MAXIMUM, OpType.VARIANCE)) {
+            List<ParamSpec> specs = OpTypeParamRegistry.paramsOf(type);
+            assertEquals(type.name(), 1, specs.size());
+            assertEquals(type.name(), "radius", specs.get(0).argKey);
+        }
     }
 
     @Test

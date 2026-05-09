@@ -32,7 +32,6 @@ import macro.builder.image.dag.DagToIjmEmitter;
 import macro.builder.image.dag.IjmToDagLoader;
 
 import java.awt.GraphicsEnvironment;
-import java.awt.Rectangle;
 import java.io.File;
 import java.lang.reflect.Field;
 import java.util.ArrayDeque;
@@ -624,14 +623,7 @@ public final class FilterExecutor {
         ImageStack copy = new ImageStack(width, height);
         for (int s = 1; s <= src.getSize(); s++) {
             ImageProcessor ip = src.getProcessor(s);
-            Rectangle oldRoi = ip.getRoi();
-            ip.setRoi(0, 0, width, height);
-            ImageProcessor cropped = ip.crop();
-            if (oldRoi != null) {
-                ip.setRoi(oldRoi);
-            } else {
-                ip.resetRoi();
-            }
+            ImageProcessor cropped = ip.duplicate();
             copy.addSlice(src.getSliceLabel(s), cropped);
         }
         ImagePlus out = new ImagePlus(source.getTitle() + "-" + label, copy);
@@ -663,14 +655,7 @@ public final class FilterExecutor {
             for (int z = 1; z <= slices; z++) {
                 int stackIndex = source.getStackIndex(sourceChannel, z, t);
                 ImageProcessor ip = src.getProcessor(stackIndex);
-                Rectangle oldRoi = ip.getRoi();
-                ip.setRoi(0, 0, width, height);
-                ImageProcessor cropped = ip.crop();
-                if (oldRoi != null) {
-                    ip.setRoi(oldRoi);
-                } else {
-                    ip.resetRoi();
-                }
+                ImageProcessor cropped = ip.duplicate();
                 copy.addSlice(src.getSliceLabel(stackIndex), cropped);
             }
         }

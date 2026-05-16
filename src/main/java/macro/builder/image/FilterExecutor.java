@@ -16,6 +16,7 @@ import ij.process.BinaryProcessor;
 import ij.process.ByteProcessor;
 import ij.process.ColorProcessor;
 import ij.process.FloatProcessor;
+import ij.process.AutoThresholder;
 import ij.process.ImageConverter;
 import ij.process.ImageProcessor;
 import ij.process.ImageStatistics;
@@ -775,6 +776,7 @@ public final class FilterExecutor {
             case CONVERT_8BIT:
             case CONVERT_16BIT:
             case CONVERT_32BIT:
+            case THRESHOLD:
                 return true;
             default:
                 return false;
@@ -1049,9 +1051,140 @@ public final class FilterExecutor {
                 }
                 break;
             }
+            case THRESHOLD: {
+                applyGlobalThreshold(imp, op);
+                break;
+            }
             default:
                 break;
         }
+    }
+
+    private static void applyGlobalThreshold(ImagePlus imp, FilterMacroParser.Op op) {
+        String mode = op.getStringParam("mode");
+        double lower;
+        double upper;
+        if ("auto".equals(mode)) {
+            ThresholdWindow window = autoThresholdWindow(imp, op);
+            lower = window.lower;
+            upper = window.upper;
+        } else {
+            lower = op.getParam("lower");
+            upper = op.getParam("upper");
+            if (Double.isNaN(lower)) lower = 0.0;
+            if (Double.isNaN(upper)) upper = 255.0;
+        }
+        applyThresholdMask(imp, lower, upper);
+    }
+
+    private static ThresholdWindow autoThresholdWindow(ImagePlus imp, FilterMacroParser.Op op) {
+        StackRange range = measureStackRange(imp);
+        int[] histogram = buildThresholdHistogram(imp, range);
+        String methodName = op.getStringParam("method");
+        if (methodName == null || methodName.length() == 0) methodName = "Default";
+        int thresholdBin = new AutoThresholder().getThreshold(
+                AutoThresholder.Method.valueOf(methodName),
+                histogram);
+        if (thresholdBin < 0) {
+            return new ThresholdWindow(range.minimum, range.maximum);
+        }
+        boolean dark = "dark".equals(op.getStringParam("background"));
+        if (dark) {
+            return new ThresholdWindow(nativeValueForBin(range, thresholdBin + 1), range.maximum);
+        }
+        return new ThresholdWindow(range.minimum, nativeValueForBin(range, thresholdBin));
+    }
+
+    private static void applyThresholdMask(ImagePlus imp, double lower, double upper) {
+        ImageStack sourceStack = imp.getStack();
+        ImageStack maskStack = new ImageStack(imp.getWidth(), imp.getHeight());
+        for (int s = 1; s <= sourceStack.getSize(); s++) {
+            ImageProcessor source = sourceStack.getProcessor(s);
+            ByteProcessor mask = new ByteProcessor(source.getWidth(), source.getHeight());
+            byte[] pixels = (byte[]) mask.getPixels();
+            for (int i = 0; i < pixels.length; i++) {
+                double value = source.getf(i);
+                if (isFinite(value) && value >= lower && value <= upper) {
+                    pixels[i] = (byte) 255;
+                }
+            }
+            maskStack.addSlice(sourceStack.getSliceLabel(s), mask);
+        }
+        int channels = Math.max(1, imp.getNChannels());
+        int slices = Math.max(1, imp.getNSlices());
+        int frames = Math.max(1, imp.getNFrames());
+        Calibration calibration = copyCalibration(imp);
+        imp.setStack(maskStack);
+        if (channels * slices * frames == maskStack.getSize()) {
+            imp.setDimensions(channels, slices, frames);
+            if (channels > 1 || slices > 1 || frames > 1) {
+                imp.setOpenAsHyperStack(true);
+            }
+        }
+        if (calibration != null) {
+            imp.setCalibration(calibration);
+        }
+    }
+
+    private static StackRange measureStackRange(ImagePlus imp) {
+        ImageStack stack = imp.getStack();
+        double minimum = Double.POSITIVE_INFINITY;
+        double maximum = Double.NEGATIVE_INFINITY;
+        for (int s = 1; s <= stack.getSize(); s++) {
+            ImageProcessor processor = stack.getProcessor(s);
+            int size = processor.getWidth() * processor.getHeight();
+            for (int i = 0; i < size; i++) {
+                double value = processor.getf(i);
+                if (isFinite(value)) {
+                    if (value < minimum) minimum = value;
+                    if (value > maximum) maximum = value;
+                }
+            }
+        }
+        if (minimum == Double.POSITIVE_INFINITY || maximum == Double.NEGATIVE_INFINITY) {
+            return new StackRange(0.0, 0.0);
+        }
+        return new StackRange(minimum, maximum);
+    }
+
+    private static int[] buildThresholdHistogram(ImagePlus imp, StackRange range) {
+        int[] histogram = new int[256];
+        ImageStack stack = imp.getStack();
+        for (int s = 1; s <= stack.getSize(); s++) {
+            ImageProcessor processor = stack.getProcessor(s);
+            int size = processor.getWidth() * processor.getHeight();
+            for (int i = 0; i < size; i++) {
+                double value = processor.getf(i);
+                if (isFinite(value)) {
+                    histogram[binFor(value, range)]++;
+                }
+            }
+        }
+        return histogram;
+    }
+
+    private static int binFor(double value, StackRange range) {
+        if (range.maximum <= range.minimum) {
+            return 0;
+        }
+        int bin = (int) Math.floor((value - range.minimum) * 255.0
+                / (range.maximum - range.minimum));
+        if (bin < 0) return 0;
+        if (bin > 255) return 255;
+        return bin;
+    }
+
+    private static double nativeValueForBin(StackRange range, int bin) {
+        if (range.maximum <= range.minimum) {
+            return range.minimum;
+        }
+        if (bin <= 0) {
+            return range.minimum;
+        }
+        if (bin >= 255) {
+            return range.maximum;
+        }
+        return range.minimum + (range.maximum - range.minimum) * bin / 255.0;
     }
 
     private static void applyFilters3D(ImagePlus imp, FilterMacroParser.Op op, int filter) {
@@ -1221,6 +1354,10 @@ public final class FilterExecutor {
         }
     }
 
+    private static boolean isFinite(double value) {
+        return !Double.isNaN(value) && !Double.isInfinite(value);
+    }
+
     /**
      * Closes the image window safely, removing it from WindowManager.
      * Pixel data is preserved — ImagePlus.close() does not call flush().
@@ -1230,6 +1367,26 @@ public final class FilterExecutor {
         if (imp != null && imp.getWindow() != null) {
             imp.changes = false;
             imp.hide();
+        }
+    }
+
+    private static final class StackRange {
+        final double minimum;
+        final double maximum;
+
+        StackRange(double minimum, double maximum) {
+            this.minimum = minimum;
+            this.maximum = maximum;
+        }
+    }
+
+    private static final class ThresholdWindow {
+        final double lower;
+        final double upper;
+
+        ThresholdWindow(double lower, double upper) {
+            this.lower = lower;
+            this.upper = upper;
         }
     }
 }

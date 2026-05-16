@@ -594,13 +594,46 @@ public class Macro_Builder implements PlugIn {
         private void openCountTester() {
             if (!ensureMacroLoaded()) return;
             if (!ensureImage()) return;
-            ThresholdShootoutDialog.show(dialog, sourceImage, lastMacro, currentPrimaryChannel(),
+            ThresholdShootoutDialog.show(dialog, sourceImage, lastMacro, lastDag, stateMacroFile(),
+                    currentPrimaryChannel(),
                     new ThresholdShootoutDialog.SettingsListener() {
                         @Override public void settingsChanged(ShootoutSettings settings) {
                             lastShootoutSettings = settings;
                         }
+                    },
+                    new ThresholdShootoutDialog.MacroEditHandler() {
+                        @Override public void macroEdited(String newIjm, DagIR newDag) {
+                            applyMacroEdit(newIjm, newDag);
+                        }
                     });
             setStatus("Opened count tester.");
+        }
+
+        void applyMacroEdit(String newIjm) {
+            applyMacroEdit(newIjm, null);
+        }
+
+        void applyMacroEdit(String newIjm, DagIR newDag) {
+            if (newIjm == null || newIjm.trim().isEmpty()) {
+                return;
+            }
+            lastMacro = newIjm;
+            lastDag = newDag;
+            if (newDag != null) {
+                selectedPrimaryChannel = Math.max(1, newDag.primaryChannel);
+            }
+            lastMacroSource = "Test Counts";
+            clearSavedMacroSelection();
+            macroArea.setText(lastMacro);
+            macroArea.setCaretPosition(0);
+            writeState();
+            refreshSourceLabel();
+            if (macroPreview != null && sourceImage != null
+                    && (macroWorker == null || macroWorker.isDone())) {
+                previewMacroAsync(lastMacro);
+            } else {
+                setStatus("Applied threshold choice to the loaded macro.");
+            }
         }
 
         private void previewLastMacro() {
@@ -1097,7 +1130,7 @@ public class Macro_Builder implements PlugIn {
             try {
                 if (!stateDir.exists()) stateDir.mkdirs();
                 if (lastMacro != null) {
-                    Files.write(new File(stateDir, "C1_Filters.ijm").toPath(),
+                    Files.write(stateMacroFile().toPath(),
                             lastMacro.getBytes(StandardCharsets.UTF_8));
                 }
                 File dagFile = new File(stateDir, "C1_Sandbox.dag.json");
@@ -1111,6 +1144,10 @@ public class Macro_Builder implements PlugIn {
             } catch (Exception ex) {
                 IJ.log("Macro Builder: could not write state: " + cleanMessage(ex));
             }
+        }
+
+        private File stateMacroFile() {
+            return new File(stateDir, "C1_Filters.ijm");
         }
 
         private void loadPrimaryChannelState() {

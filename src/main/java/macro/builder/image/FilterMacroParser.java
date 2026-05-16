@@ -22,7 +22,7 @@ import java.util.regex.Pattern;
  *                  Unsharp Mask, Minimum, Maximum, Variance
  *   Morphology     Dilate, Erode, Open, Close-, Fill Holes, Skeletonize
  *   Math           Invert, Add, Subtract, Multiply, Divide
- *   Threshold      Auto Local Threshold
+ *   Threshold      Auto Local Threshold, global setThreshold/setAutoThreshold
  *   Bit-depth      8-bit, 16-bit, 32-bit
  *   Enhance        Enhance Contrast
  *   3D filters     Gaussian Blur 3D, Median 3D, Minimum 3D
@@ -43,7 +43,7 @@ public final class FilterMacroParser {
         // Pixel math
         INVERT, ADD, SUBTRACT, MULTIPLY, DIVIDE,
         // Threshold
-        AUTO_LOCAL_THRESHOLD,
+        AUTO_LOCAL_THRESHOLD, THRESHOLD,
         // Bit-depth conversion (whole stack)
         CONVERT_8BIT, CONVERT_16BIT, CONVERT_32BIT,
         // Histogram normalisation
@@ -97,6 +97,10 @@ public final class FilterMacroParser {
     /** Regex for {@code run("Command", "args")} or {@code run("Command")}. Greedy on whitespace. */
     private static final Pattern RUN_PATTERN = Pattern.compile(
             "run\\s*\\(\\s*\"([^\"]+)\"(?:\\s*,\\s*\"([^\"]*)\")?\\s*\\)");
+    private static final Pattern SET_THRESHOLD_PATTERN = Pattern.compile(
+            "setThreshold\\s*\\(\\s*([^,]+)\\s*,\\s*([^\\)]+)\\s*\\)\\s*;?");
+    private static final Pattern SET_AUTO_THRESHOLD_PATTERN = Pattern.compile(
+            "setAutoThreshold\\s*\\(\\s*\"((?:\\\\.|[^\"])*)\"\\s*\\)\\s*;?");
 
     public static final class Op {
         public final OpType type;
@@ -162,6 +166,34 @@ public final class FilterMacroParser {
             // convention bundled presets use only //-style comments.
             if (t.startsWith("//") || t.startsWith("/*") || t.startsWith("*")) continue;
 
+            Matcher fixedThreshold = SET_THRESHOLD_PATTERN.matcher(t);
+            if (fixedThreshold.find()) {
+                try {
+                    double lower = Double.parseDouble(fixedThreshold.group(1).trim());
+                    double upper = Double.parseDouble(fixedThreshold.group(2).trim());
+                    ops.add(new Op(OpType.THRESHOLD,
+                            "mode=fixed lower=" + formatNumber(lower) + " upper=" + formatNumber(upper)));
+                } catch (NumberFormatException nfe) {
+                    ops.add(new Op(OpType.UNKNOWN, t));
+                }
+                continue;
+            }
+
+            Matcher autoThreshold = SET_AUTO_THRESHOLD_PATTERN.matcher(t);
+            if (autoThreshold.find()) {
+                String label = unescapeMacroString(autoThreshold.group(1));
+                String background = "";
+                if (label.endsWith(" dark")) {
+                    label = label.substring(0, label.length() - 5);
+                    background = " background=dark";
+                } else if (label.endsWith(" light")) {
+                    label = label.substring(0, label.length() - 6);
+                    background = " background=light";
+                }
+                ops.add(new Op(OpType.THRESHOLD, "mode=auto method=" + label + background));
+                continue;
+            }
+
             Matcher m = RUN_PATTERN.matcher(t);
             if (!m.find()) {
                 // Anything else (selectWindow, imageCalculator, close, rename,
@@ -186,6 +218,42 @@ public final class FilterMacroParser {
         }
         return ops;
     }
+
+    private static String unescapeMacroString(String text) {
+        if (text == null || text.indexOf('\\') < 0) {
+            return text == null ? "" : text;
+        }
+        StringBuilder sb = new StringBuilder(text.length());
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c != '\\' || i + 1 >= text.length()) {
+                sb.append(c);
+                continue;
+            }
+            char escaped = text.charAt(++i);
+            switch (escaped) {
+                case 'r': sb.append('\r'); break;
+                case 'n': sb.append('\n'); break;
+                case 't': sb.append('\t'); break;
+                case '"': sb.append('"'); break;
+                case '\\': sb.append('\\'); break;
+                default: sb.append(escaped); break;
+            }
+        }
+        return sb.toString();
+    }
+
+    private static String formatNumber(double value) {
+        if (value == Math.rint(value) && Math.abs(value) < 1000000000000000.0) {
+            return Long.toString(Math.round(value));
+        }
+        String text = String.format(java.util.Locale.ROOT, "%.6f", value);
+        while (text.indexOf('.') >= 0 && text.endsWith("0")) {
+            text = text.substring(0, text.length() - 1);
+        }
+        if (text.endsWith(".")) {
+            text = text.substring(0, text.length() - 1);
+        }
+        return text;
+    }
 }
-
-

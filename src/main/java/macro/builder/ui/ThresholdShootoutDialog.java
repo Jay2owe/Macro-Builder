@@ -4,19 +4,26 @@ import ij.IJ;
 import ij.ImagePlus;
 import ij.WindowManager;
 import ij.gui.Roi;
+import ij.io.FileInfo;
 import ij.plugin.Duplicator;
 import ij.plugin.frame.RoiManager;
+import macro.builder.Macro_Builder;
 import macro.builder.analysis.BatchShootoutResult;
 import macro.builder.analysis.BatchShootoutRunner;
 import macro.builder.analysis.ConsensusMaskBuilder;
 import macro.builder.analysis.GroundTruthLoader;
 import macro.builder.analysis.GroundTruthReference;
+import macro.builder.analysis.MethodsParagraphWriter;
 import macro.builder.analysis.ObjectCounter;
 import macro.builder.analysis.ShootoutRun;
 import macro.builder.analysis.ShootoutResult;
 import macro.builder.analysis.ShootoutSettings;
+import macro.builder.analysis.TestCountsManifest;
 import macro.builder.analysis.ThresholdShootoutRunner;
 import macro.builder.image.FilterExecutor;
+import macro.builder.image.dag.DagIR;
+import macro.builder.image.dag.DagToIjmEmitter;
+import macro.builder.macro.MacroApplier;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
@@ -96,10 +103,13 @@ public final class ThresholdShootoutDialog {
             "How much this method overlaps with the majority of the other methods. Lower means this method picked different objects.";
 
     private final ImagePlus source;
-    private final String macro;
+    private String macro;
+    private DagIR dag;
+    private final File macroFile;
     private final int primaryChannel;
     private final JDialog dialog;
     private final SettingsListener settingsListener;
+    private final MacroEditHandler macroEditHandler;
 
     private final JComboBox<String> countingMode = new JComboBox<String>(new String[]{COUNT_2D, COUNT_3D});
     private final JComboBox<String> thresholdMode = new JComboBox<String>(
@@ -129,6 +139,8 @@ public final class ThresholdShootoutDialog {
     private final JTable table = new JTable(tableModel);
     private final JButton runButton = new JButton("Run");
     private final JButton previewButton = new JButton("Open mask preview");
+    private final JButton applyToMacroButton = new JButton("Apply to macro");
+    private final JButton copyMethodsButton = new JButton("Copy methods paragraph");
     private final JButton consensusButton = new JButton("Show consensus mask");
     private final JButton exportButton = new JButton("Export CSV...");
     private final JButton copyRecommendedButton = new JButton("Copy recommended value");
@@ -145,20 +157,32 @@ public final class ThresholdShootoutDialog {
     private SwingWorker<ShootoutUiResult, Void> worker;
     private SwingWorker<BatchRunResult, Void> batchWorker;
     private SwingWorker<GroundTruthReference, Void> referenceWorker;
+    private SwingWorker<File, Void> sidecarWorker;
     private volatile boolean batchCancelRequested;
     private boolean closed;
     private String agreementStatusMessage;
+    private File exportedCsvFile;
+    private File sidecarFile;
+    // TODO: Replay from .testcounts.json in a later stage.
+    private File groundTruthFile;
+    private File referenceFileInFlight;
 
     private ThresholdShootoutDialog(
             Window owner,
             ImagePlus source,
             String macro,
+            DagIR dag,
+            File macroFile,
             int primaryChannel,
-            SettingsListener settingsListener) {
+            SettingsListener settingsListener,
+            MacroEditHandler macroEditHandler) {
         this.source = source;
         this.macro = macro == null ? "" : macro;
+        this.dag = dag;
+        this.macroFile = macroFile;
         this.primaryChannel = Math.max(1, primaryChannel);
         this.settingsListener = settingsListener;
+        this.macroEditHandler = macroEditHandler;
         this.dialog = new JDialog(owner, "Test Counts", Dialog.ModalityType.MODELESS);
         this.dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         this.dialog.setLayout(new BorderLayout(8, 8));
@@ -170,7 +194,7 @@ public final class ThresholdShootoutDialog {
             IJ.log("Test Counts needs the Fiji desktop UI.");
             return;
         }
-        new ThresholdShootoutDialog(owner, source, macro, 1, null).open();
+        new ThresholdShootoutDialog(owner, source, macro, null, null, 1, null, null).open();
     }
 
     public static void show(Window owner, ImagePlus source, String macro, SettingsListener settingsListener) {
@@ -187,7 +211,25 @@ public final class ThresholdShootoutDialog {
             IJ.log("Test Counts needs the Fiji desktop UI.");
             return;
         }
-        new ThresholdShootoutDialog(owner, source, macro, primaryChannel, settingsListener).open();
+        new ThresholdShootoutDialog(owner, source, macro, null, null,
+                primaryChannel, settingsListener, null).open();
+    }
+
+    public static void show(
+            Window owner,
+            ImagePlus source,
+            String macro,
+            DagIR dag,
+            File macroFile,
+            int primaryChannel,
+            SettingsListener settingsListener,
+            MacroEditHandler macroEditHandler) {
+        if (GraphicsEnvironment.isHeadless()) {
+            IJ.log("Test Counts needs the Fiji desktop UI.");
+            return;
+        }
+        new ThresholdShootoutDialog(owner, source, macro, dag, macroFile,
+                primaryChannel, settingsListener, macroEditHandler).open();
     }
 
     private void open() {
@@ -275,6 +317,8 @@ public final class ThresholdShootoutDialog {
 
         JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
         left.add(previewButton);
+        left.add(applyToMacroButton);
+        left.add(copyMethodsButton);
         left.add(consensusButton);
         left.add(exportButton);
         left.add(copyRecommendedButton);
@@ -291,6 +335,16 @@ public final class ThresholdShootoutDialog {
         previewButton.addActionListener(new ActionListener() {
             @Override public void actionPerformed(ActionEvent e) {
                 openMaskPreview();
+            }
+        });
+        applyToMacroButton.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                applySelectedToMacro();
+            }
+        });
+        copyMethodsButton.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                copyMethodsParagraph();
             }
         });
         consensusButton.addActionListener(new ActionListener() {
@@ -344,6 +398,9 @@ public final class ThresholdShootoutDialog {
                 closeShootoutRun(activeShootoutRun);
                 activeShootoutRun = null;
                 activeSettings = null;
+                if (sidecarWorker != null && !sidecarWorker.isDone()) {
+                    sidecarWorker.cancel(true);
+                }
             }
         });
     }
@@ -794,6 +851,7 @@ public final class ThresholdShootoutDialog {
             return;
         }
         final File file = chooser.getSelectedFile();
+        referenceFileInFlight = file;
         statusLabel.setText("Loading reference...");
         referenceWorker = new SwingWorker<GroundTruthReference, Void>() {
             @Override protected GroundTruthReference doInBackground() {
@@ -810,17 +868,19 @@ public final class ThresholdShootoutDialog {
 
     private void onReferenceLoaded(SwingWorker<GroundTruthReference, Void> finishedWorker) {
         try {
-            setGroundTruthReference(finishedWorker.get());
+            setGroundTruthReference(finishedWorker.get(), referenceFileInFlight);
             statusLabel.setText("Reference loaded.");
         } catch (InterruptedException ie) {
             Thread.currentThread().interrupt();
             statusLabel.setText("Reference load interrupted.");
         } catch (ExecutionException ex) {
+            groundTruthFile = null;
             IJ.showMessage("Test Counts", "Could not load reference:\n" + cleanMessage(ex.getCause()));
         } finally {
             if (finishedWorker == referenceWorker) {
                 referenceWorker = null;
             }
+            referenceFileInFlight = null;
             updateControlState();
         }
     }
@@ -843,17 +903,23 @@ public final class ThresholdShootoutDialog {
             return;
         }
         Roi[] rois = manager.getRoisAsArray();
-        setGroundTruthReference(GroundTruthLoader.fromRois("ROI Manager", rois));
+        setGroundTruthReference(GroundTruthLoader.fromRois("ROI Manager", rois), null);
         statusLabel.setText("Reference loaded from ROI Manager.");
     }
 
     private void setGroundTruthReference(GroundTruthReference reference) {
+        setGroundTruthReference(reference, null);
+    }
+
+    private void setGroundTruthReference(GroundTruthReference reference, File sourceFile) {
         groundTruthReference = reference;
         if (reference == null || reference.isEmpty()) {
             referenceLabel.setText("no reference");
             groundTruthReference = null;
+            groundTruthFile = null;
         } else {
             referenceLabel.setText(reference.size() + " objects loaded");
+            groundTruthFile = sourceFile;
         }
         if (activeSettings != null) {
             activeSettings = activeSettings.withGroundTruthReference(groundTruthReference);
@@ -928,6 +994,62 @@ public final class ThresholdShootoutDialog {
         activeConsensusPreview = preview;
     }
 
+    private void applySelectedToMacro() {
+        ShootoutResult selected = selectedResult();
+        if (selected == null || !selected.isSuccess()) {
+            IJ.showMessage("Test Counts", "Select one successful result row first.");
+            return;
+        }
+        ShootoutSettings settings = settingsForManifest();
+        String newMacro;
+        DagIR newDag = null;
+        try {
+            if (dag != null) {
+                newDag = MacroApplier.applyToDag(dag, selected, settings);
+                newMacro = DagToIjmEmitter.emit(newDag);
+            } else {
+                newMacro = MacroApplier.applyToIjm(
+                        macro,
+                        selected,
+                        settings,
+                        MacroApplier.rangeFor(selected));
+            }
+        } catch (RuntimeException ex) {
+            IJ.showMessage("Test Counts", "Could not apply the selected threshold:\n" + cleanMessage(ex));
+            return;
+        }
+
+        macro = newMacro;
+        dag = newDag;
+        if (macroEditHandler != null) {
+            macroEditHandler.macroEdited(newMacro, newDag);
+        }
+        statusLabel.setText("Applied " + selected.variant + " to the loaded macro.");
+        writeSidecarAsync(null, selected, newMacro);
+    }
+
+    private void copyMethodsParagraph() {
+        ShootoutResult selected = selectedOrRecommendedResult();
+        if (selected == null) {
+            IJ.showMessage("Test Counts", "Select a successful result row first.");
+            return;
+        }
+        try {
+            TestCountsManifest manifest = buildManifest(
+                    selected,
+                    macro,
+                    TestCountsManifest.SourceRef.inMemory(sourceTitle()),
+                    null);
+            String paragraph = MethodsParagraphWriter.write(manifest);
+            Toolkit.getDefaultToolkit().getSystemClipboard().setContents(
+                    new StringSelection(paragraph),
+                    null);
+            statusLabel.setText("Copied methods paragraph.");
+        } catch (RuntimeException ex) {
+            IJ.showMessage("Test Counts", "Could not copy the methods paragraph:\n" + cleanMessage(ex));
+        }
+    }
+
     private void exportCsv() {
         if (results.isEmpty()) {
             IJ.showMessage("Test Counts", "Run a count shootout before exporting.");
@@ -942,7 +1064,9 @@ public final class ThresholdShootoutDialog {
         File file = ensureExtension(chooser.getSelectedFile(), ".csv");
         try {
             Files.write(file.toPath(), buildCsv(results).getBytes(StandardCharsets.UTF_8));
+            exportedCsvFile = file;
             statusLabel.setText("Saved " + file.getName() + ".");
+            writeSidecarAsync(file, selectedOrRecommendedResult(), macro);
         } catch (Exception ex) {
             IJ.showMessage("Test Counts", "Could not export CSV:\n" + cleanMessage(ex));
         }
@@ -961,6 +1085,181 @@ public final class ThresholdShootoutDialog {
         } catch (RuntimeException ex) {
             IJ.showMessage("Test Counts", "Could not copy the recommended value:\n" + cleanMessage(ex));
         }
+    }
+
+    private void writeSidecarAsync(File csvFile, ShootoutResult chosen, String macroSnapshot) {
+        if (results.isEmpty()) {
+            return;
+        }
+        final File target = resolveSidecarFile(csvFile);
+        if (target == null) {
+            return;
+        }
+        final ShootoutResult chosenSnapshot = chosen;
+        final String macroText = macroSnapshot == null ? "" : macroSnapshot;
+        final List<ShootoutResult> rowSnapshot = new ArrayList<ShootoutResult>(results);
+        final ShootoutSettings settingsSnapshot = settingsForManifest();
+        final File imageFile = sourceImageFile(source);
+        final String imageTitle = sourceTitle();
+        final File truthFile = groundTruthFile;
+        final TestCountsManifest.SourceRef quickGroundTruth =
+                truthFile == null ? null : TestCountsManifest.SourceRef.file(truthFile, "");
+
+        sidecarWorker = new SwingWorker<File, Void>() {
+            @Override protected File doInBackground() throws Exception {
+                TestCountsManifest.SourceRef imageRef;
+                if (imageFile != null && imageFile.isFile()) {
+                    imageRef = TestCountsManifest.SourceRef.file(
+                            imageFile,
+                            TestCountsManifest.sha256(imageFile));
+                } else {
+                    imageRef = TestCountsManifest.SourceRef.inMemory(imageTitle);
+                }
+
+                TestCountsManifest.SourceRef groundTruthRef = quickGroundTruth;
+                if (truthFile != null && truthFile.isFile()) {
+                    groundTruthRef = TestCountsManifest.SourceRef.file(
+                            truthFile,
+                            TestCountsManifest.sha256(truthFile));
+                }
+
+                TestCountsManifest manifest = TestCountsManifest.builder()
+                        .pluginVersion(Macro_Builder.getPluginVersion())
+                        .fijiVersion(TestCountsManifest.detectFijiVersion())
+                        .imageSource(imageRef)
+                        .macroText(macroText)
+                        .settings(settingsSnapshot)
+                        .results(rowSnapshot)
+                        .chosenVariant(chosenSnapshot)
+                        .groundTruth(groundTruthRef)
+                        .build();
+                File parent = target.getParentFile();
+                if (parent != null && !parent.exists()) {
+                    parent.mkdirs();
+                }
+                Files.write(target.toPath(), manifest.toJson().getBytes(StandardCharsets.UTF_8));
+                return target;
+            }
+
+            @Override protected void done() {
+                if (sidecarWorker == this) {
+                    sidecarWorker = null;
+                }
+                if (closed || !dialog.isDisplayable()) {
+                    return;
+                }
+                try {
+                    File written = get();
+                    statusLabel.setText("Updated " + written.getName() + ".");
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    statusLabel.setText("Sidecar write interrupted.");
+                } catch (ExecutionException ex) {
+                    IJ.showMessage("Test Counts", "Could not write sidecar:\n"
+                            + target.getAbsolutePath() + "\n\n" + cleanMessage(ex.getCause()));
+                } catch (RuntimeException ex) {
+                    IJ.showMessage("Test Counts", "Could not write sidecar:\n"
+                            + target.getAbsolutePath() + "\n\n" + cleanMessage(ex));
+                }
+            }
+        };
+        sidecarWorker.execute();
+    }
+
+    private TestCountsManifest buildManifest(
+            ShootoutResult chosen,
+            String macroText,
+            TestCountsManifest.SourceRef imageRef,
+            TestCountsManifest.SourceRef groundTruthRef) {
+        return TestCountsManifest.builder()
+                .pluginVersion(Macro_Builder.getPluginVersion())
+                .fijiVersion(TestCountsManifest.detectFijiVersion())
+                .imageSource(imageRef)
+                .macroText(macroText)
+                .settings(settingsForManifest())
+                .results(results)
+                .chosenVariant(chosen)
+                .groundTruth(groundTruthRef)
+                .build();
+    }
+
+    private File resolveSidecarFile(File csvFile) {
+        if (sidecarFile != null) {
+            return sidecarFile;
+        }
+        File base = csvFile != null ? csvFile : exportedCsvFile;
+        if (base == null) {
+            base = macroFile;
+        }
+        if (base == null) {
+            base = new File("Macro_Builder_Count_Shootout.csv");
+        }
+        sidecarFile = sidecarFor(base);
+        return sidecarFile;
+    }
+
+    private static File sidecarFor(File base) {
+        File parent = base.getParentFile();
+        String name = base.getName();
+        int dot = name.lastIndexOf('.');
+        String prefix = dot > 0 ? name.substring(0, dot) : name;
+        return new File(parent == null ? new File(".") : parent, prefix + ".testcounts.json");
+    }
+
+    private ShootoutSettings settingsForManifest() {
+        if (activeSettings != null) {
+            return activeSettings;
+        }
+        try {
+            return buildSettings();
+        } catch (IllegalArgumentException ignored) {
+            return ShootoutSettings.defaults();
+        }
+    }
+
+    private ShootoutResult selectedOrRecommendedResult() {
+        ShootoutResult selected = selectedResult();
+        if (selected != null && selected.isSuccess()) {
+            return selected;
+        }
+        ShootoutResult recommended = recommendedResult();
+        if (recommended != null && recommended.isSuccess()) {
+            return recommended;
+        }
+        for (ShootoutResult row : results) {
+            if (row != null && row.isSuccess()) {
+                return row;
+            }
+        }
+        return null;
+    }
+
+    private File sourceImageFile(ImagePlus image) {
+        if (image == null) {
+            return null;
+        }
+        File fromOriginal = fileFromInfo(image.getOriginalFileInfo());
+        if (fromOriginal != null) {
+            return fromOriginal;
+        }
+        return fileFromInfo(image.getFileInfo());
+    }
+
+    private static File fileFromInfo(FileInfo info) {
+        if (info == null || info.fileName == null || info.fileName.trim().isEmpty()) {
+            return null;
+        }
+        File file = info.directory == null || info.directory.trim().isEmpty()
+                ? new File(info.fileName)
+                : new File(info.directory, info.fileName);
+        return file.isFile() ? file : null;
+    }
+
+    private String sourceTitle() {
+        if (source == null || source.getTitle() == null || source.getTitle().trim().isEmpty()) {
+            return "untitled";
+        }
+        return source.getTitle();
     }
 
     private void runBatchShootout() {
@@ -1387,6 +1686,8 @@ public final class ThresholdShootoutDialog {
 
         ShootoutResult selected = selectedResult();
         previewButton.setEnabled(!busy && selected != null && selected.isSuccess() && selected.maskPreview != null);
+        applyToMacroButton.setEnabled(!busy && selected != null && selected.isSuccess());
+        copyMethodsButton.setEnabled(!busy && selectedOrRecommendedResult() != null);
         boolean enoughAgreementRows = agreementColumnAvailable(results);
         consensusButton.setEnabled(!busy && enoughAgreementRows && activeConsensusMask != null);
         if (!enoughAgreementRows) {
@@ -1548,6 +1849,10 @@ public final class ThresholdShootoutDialog {
 
     public interface SettingsListener {
         void settingsChanged(ShootoutSettings settings);
+    }
+
+    public interface MacroEditHandler {
+        void macroEdited(String newIjm, DagIR newDag);
     }
 
     private static final class BatchRunResult {

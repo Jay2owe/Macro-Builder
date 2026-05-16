@@ -122,3 +122,5 @@ Threading model:
 - Multi-monitor and HiDPI displays can desynchronise heatmap cell pixels and axis labels. Mitigation: compute cell bounds from Swing component size in device-independent pixels and include a manual smoke check on a scaled display.
 - Viridis palette must be the standard one so colours are comparable with other tools. Mitigation: vendor Bokeh's single-file `Viridis256` table, keep the source URL/credit in the Java file header, and assert first/middle/last RGB values in `HeatmapRendererTest`.
 <!-- audit:agent2 corrected viridis source and license claim -->
+
+W10 - 11_batch-heatmap: completed at 2026-05-16T20:41:52.5194595+01:00 (commit 614b926)

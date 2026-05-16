@@ -9,7 +9,14 @@ public final class ShootoutResult {
         FAILED
     }
 
+    public enum Source {
+        AUTO,
+        FIXED,
+        GRID
+    }
+
     public final ShootoutSettings.CountingMode countingMode;
+    public final Source source;
     public final String variant;
     public final String thresholdLabel;
     public final Double thresholdValue;
@@ -33,6 +40,7 @@ public final class ShootoutResult {
 
     private ShootoutResult(
             ShootoutSettings.CountingMode countingMode,
+            Source source,
             String variant,
             Double thresholdValue,
             double imageMinimum,
@@ -55,6 +63,9 @@ public final class ShootoutResult {
         if (countingMode == null) {
             throw new IllegalArgumentException("countingMode must not be null");
         }
+        if (source == null) {
+            throw new IllegalArgumentException("source must not be null");
+        }
         if (variant == null || variant.trim().isEmpty()) {
             throw new IllegalArgumentException("variant must not be blank");
         }
@@ -72,6 +83,7 @@ public final class ShootoutResult {
         }
 
         this.countingMode = countingMode;
+        this.source = source;
         this.variant = variant;
         this.thresholdLabel = variant;
         this.thresholdValue = thresholdValue;
@@ -99,7 +111,17 @@ public final class ShootoutResult {
             String variant,
             Double thresholdValue,
             ObjectCounter.CountSummary countSummary) {
-        return success(countingMode, variant, thresholdValue, Double.NaN, Double.NaN, null, countSummary);
+        return success(Source.AUTO, countingMode, variant, thresholdValue, countSummary);
+    }
+
+    public static ShootoutResult success(
+            Source source,
+            ShootoutSettings.CountingMode countingMode,
+            String variant,
+            Double thresholdValue,
+            ObjectCounter.CountSummary countSummary) {
+        return success(source, countingMode, variant, thresholdValue,
+                Double.NaN, Double.NaN, null, countSummary);
     }
 
     public static ShootoutResult success(
@@ -110,8 +132,22 @@ public final class ShootoutResult {
             double imageMaximum,
             ImagePlus maskPreview,
             ObjectCounter.CountSummary countSummary) {
+        return success(Source.AUTO, countingMode, variant, thresholdValue,
+                imageMinimum, imageMaximum, maskPreview, countSummary);
+    }
+
+    public static ShootoutResult success(
+            Source source,
+            ShootoutSettings.CountingMode countingMode,
+            String variant,
+            Double thresholdValue,
+            double imageMinimum,
+            double imageMaximum,
+            ImagePlus maskPreview,
+            ObjectCounter.CountSummary countSummary) {
         return new ShootoutResult(
                 countingMode,
+                source,
                 variant,
                 thresholdValue,
                 imageMinimum,
@@ -138,7 +174,16 @@ public final class ShootoutResult {
             String variant,
             Double thresholdValue,
             String error) {
-        return failure(countingMode, variant, thresholdValue, Double.NaN, Double.NaN, error);
+        return failure(Source.AUTO, countingMode, variant, thresholdValue, error);
+    }
+
+    public static ShootoutResult failure(
+            Source source,
+            ShootoutSettings.CountingMode countingMode,
+            String variant,
+            Double thresholdValue,
+            String error) {
+        return failure(source, countingMode, variant, thresholdValue, Double.NaN, Double.NaN, error);
     }
 
     public static ShootoutResult failure(
@@ -148,8 +193,20 @@ public final class ShootoutResult {
             double imageMinimum,
             double imageMaximum,
             String error) {
+        return failure(Source.AUTO, countingMode, variant, thresholdValue, imageMinimum, imageMaximum, error);
+    }
+
+    public static ShootoutResult failure(
+            Source source,
+            ShootoutSettings.CountingMode countingMode,
+            String variant,
+            Double thresholdValue,
+            double imageMinimum,
+            double imageMaximum,
+            String error) {
         return new ShootoutResult(
                 countingMode,
+                source,
                 variant,
                 thresholdValue,
                 imageMinimum,
@@ -178,6 +235,7 @@ public final class ShootoutResult {
     public ShootoutResult withRecommendation(String reason) {
         return new ShootoutResult(
                 countingMode,
+                source,
                 variant,
                 thresholdValue,
                 imageMinimum,
@@ -202,6 +260,7 @@ public final class ShootoutResult {
     public ShootoutResult withoutRecommendation() {
         return new ShootoutResult(
                 countingMode,
+                source,
                 variant,
                 thresholdValue,
                 imageMinimum,
@@ -229,6 +288,7 @@ public final class ShootoutResult {
         }
         return new ShootoutResult(
                 countingMode,
+                source,
                 variant,
                 thresholdValue,
                 imageMinimum,
@@ -253,6 +313,7 @@ public final class ShootoutResult {
     public ShootoutResult withQualityScores(double separationScore, double distinctnessScore) {
         return new ShootoutResult(
                 countingMode,
+                source,
                 variant,
                 thresholdValue,
                 imageMinimum,
@@ -277,6 +338,7 @@ public final class ShootoutResult {
     public ShootoutResult withFragility(double fragilityScore, int[] fragilityCountRange) {
         return new ShootoutResult(
                 countingMode,
+                source,
                 variant,
                 thresholdValue,
                 imageMinimum,
@@ -301,6 +363,7 @@ public final class ShootoutResult {
     public ShootoutResult withAgreement(double agreementScore) {
         return new ShootoutResult(
                 countingMode,
+                source,
                 variant,
                 thresholdValue,
                 imageMinimum,
@@ -325,6 +388,7 @@ public final class ShootoutResult {
     public ShootoutResult withoutMaskPreview() {
         return new ShootoutResult(
                 countingMode,
+                source,
                 variant,
                 thresholdValue,
                 imageMinimum,

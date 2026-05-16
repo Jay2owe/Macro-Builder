@@ -72,6 +72,9 @@ public final class DagToIjmEmitter {
     }
 
     private static String emitRun(DagNode node) {
+        if (node.type == OpType.THRESHOLD) {
+            return emitThreshold(node.args);
+        }
         String command = commandFor(node.type);
         boolean legacyCommand = false;
         if (command == null && node.commandName != null && node.commandName.trim().length() > 0) {
@@ -114,6 +117,7 @@ public final class DagToIjmEmitter {
             case MULTIPLY: return "Multiply";
             case DIVIDE: return "Divide";
             case AUTO_LOCAL_THRESHOLD: return "Auto Local Threshold";
+            case THRESHOLD: return null;
             case CONVERT_8BIT: return "8-bit";
             case CONVERT_16BIT: return "16-bit";
             case CONVERT_32BIT: return "32-bit";
@@ -123,6 +127,30 @@ public final class DagToIjmEmitter {
             case MINIMUM_3D: return "Minimum 3D";
             default: return null;
         }
+    }
+
+    private static String emitThreshold(String args) {
+        String mode = argValue(args, "mode");
+        if ("auto".equals(mode)) {
+            String method = argValue(args, "method");
+            if (method.length() == 0) method = "Default";
+            String background = argValue(args, "background");
+            String suffix = "dark".equals(background) ? " dark" : "";
+            return "setAutoThreshold(\"" + escapeMacroArg(method + suffix) + "\");\n";
+        }
+        String lower = argValue(args, "lower");
+        String upper = argValue(args, "upper");
+        if (lower.length() == 0) lower = "0";
+        if (upper.length() == 0) upper = "255";
+        return "setThreshold(" + lower + ", " + upper + ");\n";
+    }
+
+    private static String argValue(String args, String key) {
+        if (args == null || key == null || key.length() == 0) return "";
+        java.util.regex.Pattern p = java.util.regex.Pattern.compile(
+                "(?:^|\\s)" + java.util.regex.Pattern.quote(key) + "=([^\\s]+)");
+        java.util.regex.Matcher m = p.matcher(args);
+        return m.find() ? m.group(1) : "";
     }
 
     private static String imageCalculatorCommand(CombinerOp op) {

@@ -164,6 +164,7 @@ public final class ThresholdShootoutRunner {
             ImagePlus mask = createMask(context.processed, method + " mask", window.lower, window.upper);
             ObjectCounter.CountSummary count = ObjectCounter.count(mask, settings);
             ShootoutResult result = ShootoutResult.success(
+                    ShootoutResult.Source.AUTO,
                     settings.countingMode,
                     method,
                     Double.valueOf(window.displayValue),
@@ -174,6 +175,7 @@ public final class ThresholdShootoutRunner {
             return withFragility(withQualityScores(withGroundTruthScore(result, settings), context), context, settings);
         } catch (RuntimeException ex) {
             return ShootoutResult.failure(
+                    ShootoutResult.Source.AUTO,
                     settings.countingMode,
                     method,
                     null,
@@ -192,6 +194,7 @@ public final class ThresholdShootoutRunner {
             ImagePlus mask = createMask(context.processed, label + " mask", value, context.rangeMax);
             ObjectCounter.CountSummary count = ObjectCounter.count(mask, settings);
             ShootoutResult result = ShootoutResult.success(
+                    ShootoutResult.Source.FIXED,
                     settings.countingMode,
                     label,
                     Double.valueOf(value),
@@ -202,6 +205,7 @@ public final class ThresholdShootoutRunner {
             return withFragility(withQualityScores(withGroundTruthScore(result, settings), context), context, settings);
         } catch (RuntimeException ex) {
             return ShootoutResult.failure(
+                    ShootoutResult.Source.FIXED,
                     settings.countingMode,
                     label,
                     Double.valueOf(value),
@@ -220,6 +224,7 @@ public final class ThresholdShootoutRunner {
             ImagePlus mask = createMask(context.processed, label + " mask", value, context.rangeMax);
             ObjectCounter.CountSummary count = ObjectCounter.count(mask, settings);
             ShootoutResult result = ShootoutResult.success(
+                    ShootoutResult.Source.GRID,
                     settings.countingMode,
                     label,
                     Double.valueOf(value),
@@ -230,6 +235,7 @@ public final class ThresholdShootoutRunner {
             return withQualityScores(withGroundTruthScore(result, settings), context);
         } catch (RuntimeException ex) {
             return ShootoutResult.failure(
+                    ShootoutResult.Source.GRID,
                     settings.countingMode,
                     label,
                     Double.valueOf(value),

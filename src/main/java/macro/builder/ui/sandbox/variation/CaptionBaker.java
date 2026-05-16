@@ -13,9 +13,9 @@ import java.awt.Font;
  * white fill so it remains readable over any image content.
  *
  * <p>The {@code ImagePlus} passed in is mutated. Callers MUST clone the
- * variant's {@link ImagePlus} before baking — see stage 06's known risks: the
- * uncaptioned {@code VariantResult.output} must remain available for downstream
- * consumers (Promote, montage export, future analysis).
+ * variant's {@link ImagePlus} before baking because the uncaptioned
+ * {@code VariantResult.output} is reused by Promote and montage export, so it
+ * must not be mutated in place.
  */
 public final class CaptionBaker {
 

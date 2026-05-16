@@ -29,10 +29,9 @@ import java.awt.event.MouseEvent;
  * lazily-computed max-projection {@link ImagePlus}. Toggling MIP swaps the
  * visible {@code ImageCanvas} via {@link #setMipMode(boolean)}.
  *
- * <p>Stage 06 keeps the tile read-only — per-tile action buttons (Promote,
- * Save preset, X) land in stage 07 and must live in the caption strip
- * <em>above</em> the canvas, never floating over it. {@code ImageCanvas}
- * extends AWT {@code Canvas}; Swing's lightweight clipping doesn't apply, so
+ * <p>Per-tile action buttons (Promote, Save preset, X) must live in the
+ * caption strip above the canvas, never floating over it. {@code ImageCanvas}
+ * extends AWT {@code Canvas}; Swing's lightweight clipping does not apply, so
  * any widget overlapping the canvas region would be hidden.
  */
 public final class TilePanel extends JPanel {

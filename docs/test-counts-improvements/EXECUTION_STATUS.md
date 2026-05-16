@@ -31,3 +31,4 @@ W6 - 07_fragility-bar: completed at 2026-05-16T19:29:35.1147400+01:00 (commit 37
 W7 - 08_method-agreement: completed at 2026-05-16T19:43:21.0089688+01:00 (commit 09b49c2)
 W8 - 09_macro-roundtrip-and-sidecar: FAILED at 2026-05-16T18:49:19Z (reason: codex agent surrendered turn before making changes; no commit, no file rename)
 W8 - 09_macro-roundtrip-and-sidecar: completed (corrective) at 2026-05-16T20:09:08.2040430+01:00 (commit 1b13275)
+W9 - 10_live-threshold-slider: completed at 2026-05-16T20:22:41.9760267+01:00 (commit 2ffff0f)

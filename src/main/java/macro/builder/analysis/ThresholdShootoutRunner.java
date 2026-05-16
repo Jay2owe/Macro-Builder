@@ -109,6 +109,16 @@ public final class ThresholdShootoutRunner {
         return ShootoutSettings.defaultAutoMethods();
     }
 
+    public ShootoutResult runOneVariant(ShootoutContext context, ShootoutSettings settings, double value) {
+        if (context == null) {
+            throw new IllegalArgumentException("context must not be null");
+        }
+        if (settings == null) {
+            throw new IllegalArgumentException("settings must not be null");
+        }
+        return runFixedVariant(context, settings, value, pinnedLabel(value));
+    }
+
     public ImagePlus takeConsensusMask() {
         ImagePlus mask = lastConsensusMask;
         lastConsensusMask = null;
@@ -189,7 +199,14 @@ public final class ThresholdShootoutRunner {
             ShootoutContext context,
             ShootoutSettings settings,
             double value) {
-        String label = fixedLabel(value);
+        return runFixedVariant(context, settings, value, fixedLabel(value));
+    }
+
+    private static ShootoutResult runFixedVariant(
+            ShootoutContext context,
+            ShootoutSettings settings,
+            double value,
+            String label) {
         try {
             ImagePlus mask = createMask(context.processed, label + " mask", value, context.rangeMax);
             ObjectCounter.CountSummary count = ObjectCounter.count(mask, settings);
@@ -873,6 +890,10 @@ public final class ThresholdShootoutRunner {
             return "Fixed " + Long.toString(Math.round(value));
         }
         return "Fixed " + Double.toString(value);
+    }
+
+    private static String pinnedLabel(double value) {
+        return "Pinned " + shortNumber(value);
     }
 
     private static String gridLabel(double value) {

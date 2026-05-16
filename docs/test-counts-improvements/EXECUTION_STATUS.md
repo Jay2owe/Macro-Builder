@@ -26,3 +26,4 @@ W1 - 02_auto-threshold-grid: completed at 2026-05-16T18:07:59.8324223+01:00 (com
 W2 - 04_batch-bioformats-and-channels: completed at 2026-05-16T18:20:58.0932460+01:00 (commit 38586ee)
 W3 - 03_histogram-and-curve-charts: completed at 2026-05-16T18:35:24.3748946+01:00 (commit 7af8af6)
 W4 - 05_ground-truth-scoring: completed at 2026-05-16T18:54:51.0434567+01:00 (commit 5d3b3ac)
+W5 - 06_quality-score-columns: completed at 2026-05-16T19:07:55.2452488+01:00 (commit 5f1148e)

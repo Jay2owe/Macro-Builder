@@ -355,6 +355,12 @@ public final class VariationChooserDialog extends JDialog {
             @Override
             protected void done() {
                 progress.dispose();
+                if (isCancelled()) {
+                    generateButton.setEnabled(true);
+                    memoryLabel.setForeground(Color.BLACK);
+                    memoryLabel.setText("Variant generation cancelled. Partial results discarded.");
+                    return;
+                }
                 List<VariantResult> results;
                 try {
                     results = get();
@@ -369,6 +375,11 @@ public final class VariationChooserDialog extends JDialog {
                 resultCallback.accept(finalResults);
             }
         };
+        progress.setCancelHandler(new Runnable() {
+            @Override public void run() {
+                worker.cancel(true);
+            }
+        });
         progress.setVisible(true);
         worker.execute();
     }

@@ -17,6 +17,8 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -166,6 +168,71 @@ public class VariantExecutorTest {
         List<VariantResult> results = VariantExecutor.runAll(
                 source, Collections.<VariantPlan>emptyList(), null);
         assertTrue(results.isEmpty());
+    }
+
+    @Test
+    public void runAllStopsOnThreadInterruptAndReturnsPartialList() throws Exception {
+        final ImagePlus source = shortStack(32, 32, 1);
+        final List<VariantPlan> plans = blurPlans(32, 32, new double[]{1.0, 2.0, 3.0});
+        final AtomicReference<List<VariantResult>> results =
+                new AtomicReference<List<VariantResult>>();
+        final AtomicBoolean cancelled = new AtomicBoolean(false);
+        final AtomicBoolean allDone = new AtomicBoolean(false);
+
+        Thread worker = new Thread(new Runnable() {
+            @Override public void run() {
+                Thread.currentThread().interrupt();
+                results.set(VariantExecutor.runAll(source, plans, new ProgressCallback() {
+                    @Override public void onAllDone(List<VariantResult> ignored) {
+                        allDone.set(true);
+                    }
+                    @Override public void onCancelled() {
+                        cancelled.set(true);
+                    }
+                }));
+            }
+        }, "variant-executor-interrupt-test");
+
+        worker.start();
+        worker.join(5000L);
+        assertFalse("runAll should return promptly when interrupted", worker.isAlive());
+        flushEdt();
+
+        assertNotNull(results.get());
+        assertTrue("interrupted run should return the partial list collected so far",
+                results.get().isEmpty());
+        assertTrue("onCancelled should fire", cancelled.get());
+        assertFalse("onAllDone should not fire after cancellation", allDone.get());
+    }
+
+    @Test
+    public void runAllInterruptedPartialListContainsCompleteVariantResults() throws Exception {
+        final ImagePlus source = shortStack(32, 32, 1);
+        final List<VariantPlan> plans = blurPlans(32, 32, new double[]{1.0, 2.0, 3.0});
+        final AtomicReference<List<VariantResult>> results =
+                new AtomicReference<List<VariantResult>>();
+
+        Thread worker = new Thread(new Runnable() {
+            @Override public void run() {
+                Thread.currentThread().interrupt();
+                results.set(VariantExecutor.runAll(source, plans, null));
+            }
+        }, "variant-executor-partial-test");
+
+        worker.start();
+        worker.join(5000L);
+        assertFalse("runAll should return promptly when interrupted", worker.isAlive());
+
+        List<VariantResult> partial = results.get();
+        assertNotNull(partial);
+        assertTrue("partial result list should be no larger than the requested plans",
+                partial.size() <= plans.size());
+        for (VariantResult result : partial) {
+            assertNotNull(result.plan);
+            assertTrue("partial entries must be complete successes or captured failures",
+                    (result.output != null && result.error == null)
+                            || (result.output == null && result.error != null));
+        }
     }
 
     // ── helpers ──

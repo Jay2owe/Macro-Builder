@@ -36,6 +36,7 @@ public final class ShootoutSettings {
     public final boolean darkBackground;
     public final List<Integer> channelsToSweep;
     public final GroundTruthReference groundTruthReference;
+    public final boolean runFragilityChecks;
 
     public ShootoutSettings(
             CountingMode countingMode,
@@ -55,7 +56,8 @@ public final class ShootoutSettings {
                 maxSize,
                 darkBackground,
                 defaultChannelsToSweep(),
-                null);
+                null,
+                true);
     }
 
     public ShootoutSettings(
@@ -77,7 +79,8 @@ public final class ShootoutSettings {
                 maxSize,
                 darkBackground,
                 defaultChannelsToSweep(),
-                null);
+                null,
+                true);
     }
 
     public ShootoutSettings(
@@ -100,7 +103,8 @@ public final class ShootoutSettings {
                 maxSize,
                 darkBackground,
                 channelsToSweep,
-                null);
+                null,
+                true);
     }
 
     public ShootoutSettings(
@@ -114,6 +118,32 @@ public final class ShootoutSettings {
             boolean darkBackground,
             List<Integer> channelsToSweep,
             GroundTruthReference groundTruthReference) {
+        this(
+                countingMode,
+                thresholdMode,
+                autoMethods,
+                fixedThresholds,
+                gridSteps,
+                minSize,
+                maxSize,
+                darkBackground,
+                channelsToSweep,
+                groundTruthReference,
+                true);
+    }
+
+    public ShootoutSettings(
+            CountingMode countingMode,
+            ThresholdMode thresholdMode,
+            List<String> autoMethods,
+            List<Double> fixedThresholds,
+            int gridSteps,
+            double minSize,
+            double maxSize,
+            boolean darkBackground,
+            List<Integer> channelsToSweep,
+            GroundTruthReference groundTruthReference,
+            boolean runFragilityChecks) {
         if (countingMode == null) {
             throw new IllegalArgumentException("countingMode must not be null");
         }
@@ -141,6 +171,7 @@ public final class ShootoutSettings {
         this.darkBackground = darkBackground;
         this.channelsToSweep = immutableChannelCopy(channelsToSweep);
         this.groundTruthReference = groundTruthReference;
+        this.runFragilityChecks = runFragilityChecks;
     }
 
     public static ShootoutSettings defaults() {
@@ -154,7 +185,8 @@ public final class ShootoutSettings {
                 Double.POSITIVE_INFINITY,
                 true,
                 defaultChannelsToSweep(),
-                null);
+                null,
+                true);
     }
 
     public ShootoutSettings withChannelsToSweep(List<Integer> channels) {
@@ -168,7 +200,8 @@ public final class ShootoutSettings {
                 maxSize,
                 darkBackground,
                 channels,
-                groundTruthReference);
+                groundTruthReference,
+                runFragilityChecks);
     }
 
     public ShootoutSettings withGroundTruthReference(GroundTruthReference reference) {
@@ -182,7 +215,23 @@ public final class ShootoutSettings {
                 maxSize,
                 darkBackground,
                 channelsToSweep,
-                reference);
+                reference,
+                runFragilityChecks);
+    }
+
+    public ShootoutSettings withRunFragilityChecks(boolean runFragilityChecks) {
+        return new ShootoutSettings(
+                countingMode,
+                thresholdMode,
+                autoMethods,
+                fixedThresholds,
+                gridSteps,
+                minSize,
+                maxSize,
+                darkBackground,
+                channelsToSweep,
+                groundTruthReference,
+                runFragilityChecks);
     }
 
     public static List<Integer> defaultChannelsToSweep() {

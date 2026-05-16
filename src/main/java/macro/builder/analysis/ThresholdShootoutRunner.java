@@ -128,7 +128,7 @@ public final class ThresholdShootoutRunner {
             for (Double value : thresholds) {
                 gridRows.add(runGridVariant(context, settings, value.doubleValue()));
             }
-            rows.addAll(withRecommendedPlateau(gridRows));
+            rows.addAll(withRecommendedPlateau(withGridFragility(gridRows, settings)));
         }
 
         if (settings.groundTruthReference != null) {
@@ -153,7 +153,7 @@ public final class ThresholdShootoutRunner {
                     context.rangeMax,
                     mask,
                     count);
-            return withQualityScores(withGroundTruthScore(result, settings), context);
+            return withFragility(withQualityScores(withGroundTruthScore(result, settings), context), context, settings);
         } catch (RuntimeException ex) {
             return ShootoutResult.failure(
                     settings.countingMode,
@@ -181,7 +181,7 @@ public final class ThresholdShootoutRunner {
                     context.rangeMax,
                     mask,
                     count);
-            return withQualityScores(withGroundTruthScore(result, settings), context);
+            return withFragility(withQualityScores(withGroundTruthScore(result, settings), context), context, settings);
         } catch (RuntimeException ex) {
             return ShootoutResult.failure(
                     settings.countingMode,
@@ -259,6 +259,54 @@ public final class ThresholdShootoutRunner {
         return updated;
     }
 
+    private static List<ShootoutResult> withGridFragility(
+            List<ShootoutResult> gridRows,
+            ShootoutSettings settings) {
+        if (gridRows == null || gridRows.isEmpty()) {
+            return Collections.emptyList();
+        }
+        if (settings == null || !settings.runFragilityChecks) {
+            return gridRows;
+        }
+
+        List<ShootoutResult> updated = new ArrayList<ShootoutResult>(gridRows.size());
+        for (int i = 0; i < gridRows.size(); i++) {
+            ShootoutResult row = gridRows.get(i);
+            if (row == null || !row.isSuccess() || row.countSummary == null) {
+                updated.add(row);
+                continue;
+            }
+            int[] samples = neighbourGridCounts(gridRows, i);
+            updated.add(row.withFragility(
+                    FragilityProbe.scoreFrom(samples, row.countSummary.count),
+                    samples));
+        }
+        return updated;
+    }
+
+    private static int[] neighbourGridCounts(List<ShootoutResult> gridRows, int index) {
+        List<Integer> counts = new ArrayList<Integer>(4);
+        addNeighbourCount(counts, gridRows, index - 1);
+        addNeighbourCount(counts, gridRows, index + 1);
+        addNeighbourCount(counts, gridRows, index - 2);
+        addNeighbourCount(counts, gridRows, index + 2);
+        int[] out = new int[counts.size()];
+        for (int i = 0; i < counts.size(); i++) {
+            out[i] = counts.get(i).intValue();
+        }
+        return out;
+    }
+
+    private static void addNeighbourCount(List<Integer> counts, List<ShootoutResult> rows, int index) {
+        if (index < 0 || index >= rows.size()) {
+            return;
+        }
+        ShootoutResult row = rows.get(index);
+        if (row != null && row.isSuccess() && row.countSummary != null) {
+            counts.add(Integer.valueOf(row.countSummary.count));
+        }
+    }
+
     private static ShootoutResult withGroundTruthScore(ShootoutResult result, ShootoutSettings settings) {
         if (result == null || settings == null || settings.groundTruthReference == null || !result.isSuccess()) {
             return result;
@@ -276,6 +324,25 @@ public final class ThresholdShootoutRunner {
         return result.withQualityScores(
                 HistogramQualityScorer.separation(context.histogram, threshold, context),
                 HistogramQualityScorer.distinctness(context.histogram, threshold, context));
+    }
+
+    private static ShootoutResult withFragility(
+            ShootoutResult result,
+            ShootoutContext context,
+            ShootoutSettings settings) {
+        if (result == null
+                || context == null
+                || settings == null
+                || !settings.runFragilityChecks
+                || !result.isSuccess()
+                || result.thresholdValue == null
+                || result.countSummary == null) {
+            return result;
+        }
+        int[] samples = FragilityProbe.probe(context, settings, result.thresholdValue.doubleValue());
+        return result.withFragility(
+                FragilityProbe.scoreFrom(samples, result.countSummary.count),
+                samples);
     }
 
     private static List<ShootoutResult> withRecommendedReferenceWinner(List<ShootoutResult> rows) {
@@ -354,7 +421,7 @@ public final class ThresholdShootoutRunner {
         return new ThresholdWindow(context.rangeMin, thresholdValue, thresholdValue);
     }
 
-    private static ImagePlus createMask(ImagePlus image, String title, double lower, double upper) {
+    static ImagePlus createMask(ImagePlus image, String title, double lower, double upper) {
         ImageStack sourceStack = image.getStack();
         ImageStack maskStack = new ImageStack(image.getWidth(), image.getHeight());
         int nSlices = sourceStack.getSize();

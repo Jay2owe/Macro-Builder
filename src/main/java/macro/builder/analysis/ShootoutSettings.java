@@ -18,13 +18,19 @@ public final class ShootoutSettings {
     public enum ThresholdMode {
         AUTO_METHODS,
         FIXED_VALUES,
-        AUTO_AND_FIXED
+        AUTO_AND_FIXED,
+        AUTO_GRID
     }
+
+    public static final int DEFAULT_GRID_STEPS = 10;
+    public static final int MIN_GRID_STEPS = 4;
+    public static final int MAX_GRID_STEPS = 40;
 
     public final CountingMode countingMode;
     public final ThresholdMode thresholdMode;
     public final List<String> autoMethods;
     public final List<Double> fixedThresholds;
+    public final int gridSteps;
     public final double minSize;
     public final double maxSize;
     public final boolean darkBackground;
@@ -34,6 +40,26 @@ public final class ShootoutSettings {
             ThresholdMode thresholdMode,
             List<String> autoMethods,
             List<Double> fixedThresholds,
+            double minSize,
+            double maxSize,
+            boolean darkBackground) {
+        this(
+                countingMode,
+                thresholdMode,
+                autoMethods,
+                fixedThresholds,
+                DEFAULT_GRID_STEPS,
+                minSize,
+                maxSize,
+                darkBackground);
+    }
+
+    public ShootoutSettings(
+            CountingMode countingMode,
+            ThresholdMode thresholdMode,
+            List<String> autoMethods,
+            List<Double> fixedThresholds,
+            int gridSteps,
             double minSize,
             double maxSize,
             boolean darkBackground) {
@@ -49,11 +75,16 @@ public final class ShootoutSettings {
         if (Double.isNaN(maxSize) || maxSize < minSize) {
             throw new IllegalArgumentException("maxSize must be greater than or equal to minSize");
         }
+        if (gridSteps < MIN_GRID_STEPS || gridSteps > MAX_GRID_STEPS) {
+            throw new IllegalArgumentException("gridSteps must be between "
+                    + MIN_GRID_STEPS + " and " + MAX_GRID_STEPS);
+        }
 
         this.countingMode = countingMode;
         this.thresholdMode = thresholdMode;
         this.autoMethods = immutableCopy(autoMethods);
         this.fixedThresholds = immutableDoubleCopy(fixedThresholds);
+        this.gridSteps = gridSteps;
         this.minSize = minSize;
         this.maxSize = maxSize;
         this.darkBackground = darkBackground;
@@ -65,6 +96,7 @@ public final class ShootoutSettings {
                 ThresholdMode.AUTO_METHODS,
                 defaultAutoMethods(),
                 Collections.<Double>emptyList(),
+                DEFAULT_GRID_STEPS,
                 0.0,
                 Double.POSITIVE_INFINITY,
                 true);

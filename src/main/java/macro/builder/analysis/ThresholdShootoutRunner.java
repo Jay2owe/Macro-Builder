@@ -13,7 +13,9 @@ import macro.builder.image.ParallelContext;
 import macro.builder.image.dag.IjmToDagLoader;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -120,6 +122,15 @@ public final class ThresholdShootoutRunner {
             }
         }
 
+        if (usesGrid(settings.thresholdMode)) {
+            List<ShootoutResult> gridRows = new ArrayList<ShootoutResult>();
+            List<Double> thresholds = gridThresholds(context, settings.gridSteps);
+            for (Double value : thresholds) {
+                gridRows.add(runGridVariant(context, settings, value.doubleValue()));
+            }
+            rows.addAll(withRecommendedPlateau(gridRows));
+        }
+
         return rows;
     }
 
@@ -175,6 +186,88 @@ public final class ThresholdShootoutRunner {
                     context.rangeMax,
                     cleanMessage(ex));
         }
+    }
+
+    private static ShootoutResult runGridVariant(
+            ShootoutContext context,
+            ShootoutSettings settings,
+            double value) {
+        String label = gridLabel(value);
+        try {
+            ImagePlus mask = createMask(context.processed, label + " mask", value, context.rangeMax);
+            ObjectCounter.CountSummary count = ObjectCounter.count(mask, settings);
+            return ShootoutResult.success(
+                    settings.countingMode,
+                    label,
+                    Double.valueOf(value),
+                    context.rangeMin,
+                    context.rangeMax,
+                    mask,
+                    count);
+        } catch (RuntimeException ex) {
+            return ShootoutResult.failure(
+                    settings.countingMode,
+                    label,
+                    Double.valueOf(value),
+                    context.rangeMin,
+                    context.rangeMax,
+                    cleanMessage(ex));
+        }
+    }
+
+    private static List<ShootoutResult> withRecommendedPlateau(List<ShootoutResult> gridRows) {
+        if (gridRows == null || gridRows.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        List<Integer> rowIndexes = new ArrayList<Integer>();
+        List<Double> thresholds = new ArrayList<Double>();
+        List<Integer> counts = new ArrayList<Integer>();
+        for (int i = 0; i < gridRows.size(); i++) {
+            ShootoutResult row = gridRows.get(i);
+            if (row != null && row.isSuccess() && row.thresholdValue != null && row.countSummary != null) {
+                rowIndexes.add(Integer.valueOf(i));
+                thresholds.add(row.thresholdValue);
+                counts.add(Integer.valueOf(row.countSummary.count));
+            }
+        }
+        if (rowIndexes.isEmpty()) {
+            return gridRows;
+        }
+
+        double[] thresholdValues = new double[thresholds.size()];
+        int[] countValues = new int[counts.size()];
+        for (int i = 0; i < thresholds.size(); i++) {
+            thresholdValues[i] = thresholds.get(i).doubleValue();
+            countValues[i] = counts.get(i).intValue();
+        }
+
+        int plateauIndex = PlateauFinder.findPlateauIndex(thresholdValues, countValues);
+        if (plateauIndex < 0) {
+            return gridRows;
+        }
+
+        List<ShootoutResult> updated = new ArrayList<ShootoutResult>(gridRows);
+        int rowIndex = rowIndexes.get(plateauIndex).intValue();
+        updated.set(rowIndex, updated.get(rowIndex).withRecommendation(PlateauFinder.DEFAULT_REASON));
+        return updated;
+    }
+
+    static List<Double> gridThresholds(ShootoutContext context, int steps) {
+        if (context == null) {
+            throw new IllegalArgumentException("context must not be null");
+        }
+        int count = Math.max(1, steps);
+        double span = context.rangeMax - context.rangeMin;
+        if (!isFinite(span) || span <= 0.0 || count < 2) {
+            return Collections.singletonList(Double.valueOf(context.rangeMin));
+        }
+
+        List<Double> values = new ArrayList<Double>(count);
+        for (int i = 0; i < count; i++) {
+            values.add(Double.valueOf(context.rangeMin + span * i / (double) (count - 1)));
+        }
+        return values;
     }
 
     private static ThresholdWindow autoThresholdWindow(
@@ -550,11 +643,33 @@ public final class ThresholdShootoutRunner {
                 || mode == ShootoutSettings.ThresholdMode.AUTO_AND_FIXED;
     }
 
+    private static boolean usesGrid(ShootoutSettings.ThresholdMode mode) {
+        return mode == ShootoutSettings.ThresholdMode.AUTO_GRID;
+    }
+
     private static String fixedLabel(double value) {
         if (value == Math.rint(value)) {
             return "Fixed " + Long.toString(Math.round(value));
         }
         return "Fixed " + Double.toString(value);
+    }
+
+    private static String gridLabel(double value) {
+        return "Grid " + shortNumber(value);
+    }
+
+    private static String shortNumber(double value) {
+        if (value == Math.rint(value) && Math.abs(value) < 1000000000000000.0) {
+            return Long.toString(Math.round(value));
+        }
+        String formatted = String.format(Locale.ROOT, "%.4f", value);
+        while (formatted.indexOf('.') >= 0 && formatted.endsWith("0")) {
+            formatted = formatted.substring(0, formatted.length() - 1);
+        }
+        if (formatted.endsWith(".")) {
+            formatted = formatted.substring(0, formatted.length() - 1);
+        }
+        return formatted;
     }
 
     private static String cleanMessage(Throwable ex) {

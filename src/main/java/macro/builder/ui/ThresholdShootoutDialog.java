@@ -23,18 +23,24 @@ import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JProgressBar;
 import javax.swing.JScrollPane;
+import javax.swing.JSpinner;
 import javax.swing.JTable;
 import javax.swing.JTextField;
 import javax.swing.ListSelectionModel;
+import javax.swing.SpinnerNumberModel;
 import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
 import javax.swing.WindowConstants;
+import javax.swing.event.ChangeEvent;
+import javax.swing.event.ChangeListener;
 import javax.swing.event.ListSelectionEvent;
 import javax.swing.event.ListSelectionListener;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import javax.swing.table.AbstractTableModel;
+import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.TableColumnModel;
 import java.awt.BorderLayout;
+import java.awt.Component;
 import java.awt.Dialog;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
@@ -43,11 +49,13 @@ import java.awt.GraphicsEnvironment;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
+import java.awt.Toolkit;
 import java.awt.Window;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
+import java.awt.datatransfer.StringSelection;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -64,6 +72,7 @@ public final class ThresholdShootoutDialog {
     private static final String MODE_AUTO = "Auto threshold shootout";
     private static final String MODE_FIXED = "Fixed numeric threshold";
     private static final String MODE_AUTO_AND_FIXED = "Auto methods + fixed thresholds";
+    private static final String MODE_AUTO_GRID = "Auto grid (recommended)";
 
     private final ImagePlus source;
     private final String macro;
@@ -73,7 +82,13 @@ public final class ThresholdShootoutDialog {
 
     private final JComboBox<String> countingMode = new JComboBox<String>(new String[]{COUNT_2D, COUNT_3D});
     private final JComboBox<String> thresholdMode = new JComboBox<String>(
-            new String[]{MODE_AUTO, MODE_FIXED, MODE_AUTO_AND_FIXED});
+            new String[]{MODE_AUTO_GRID, MODE_AUTO, MODE_FIXED, MODE_AUTO_AND_FIXED});
+    private final JSpinner gridSteps = new JSpinner(new SpinnerNumberModel(
+            ShootoutSettings.DEFAULT_GRID_STEPS,
+            ShootoutSettings.MIN_GRID_STEPS,
+            ShootoutSettings.MAX_GRID_STEPS,
+            1));
+    private final JLabel gridWarning = new JLabel("Below 6 grid steps, recommendations are less reliable.");
     private final JTextField autoMethods = new JTextField(join(ShootoutSettings.defaultAutoMethods()), 32);
     private final JTextField fixedThresholds = new JTextField("", 18);
     private final JTextField minSize = new JTextField("0", 8);
@@ -87,6 +102,7 @@ public final class ThresholdShootoutDialog {
     private final JButton runButton = new JButton("Run");
     private final JButton previewButton = new JButton("Open mask preview");
     private final JButton exportButton = new JButton("Export CSV...");
+    private final JButton copyRecommendedButton = new JButton("Copy recommended value");
     private final JButton batchButton = new JButton("Run batch...");
     private final JButton cancelBatchButton = new JButton("Cancel batch");
 
@@ -155,7 +171,7 @@ public final class ThresholdShootoutDialog {
 
         int row = 0;
         addSettingRow(settings, row++, "Counting mode:", countingMode);
-        addSettingRow(settings, row++, "Threshold mode:", thresholdMode);
+        addThresholdModeRow(settings, row++);
         addSettingRow(settings, row++, "Auto methods:", autoMethods);
         addSettingRow(settings, row++, "Fixed thresholds:", fixedThresholds);
         addHelpRow(settings, row++, ShootoutSettings.FIXED_THRESHOLD_HELP);
@@ -165,6 +181,11 @@ public final class ThresholdShootoutDialog {
 
         thresholdMode.addActionListener(new ActionListener() {
             @Override public void actionPerformed(ActionEvent e) {
+                updateControlState();
+            }
+        });
+        gridSteps.addChangeListener(new ChangeListener() {
+            @Override public void stateChanged(ChangeEvent e) {
                 updateControlState();
             }
         });
@@ -179,6 +200,7 @@ public final class ThresholdShootoutDialog {
             }
         });
         configureColumns(table.getColumnModel());
+        table.getColumnModel().getColumn(0).setCellRenderer(new RecommendedVariantRenderer(tableModel));
         JScrollPane scroll = new JScrollPane(table);
         scroll.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createEmptyBorder(0, 12, 0, 12),
@@ -199,6 +221,7 @@ public final class ThresholdShootoutDialog {
         JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
         left.add(previewButton);
         left.add(exportButton);
+        left.add(copyRecommendedButton);
         left.add(batchButton);
         left.add(cancelBatchButton);
 
@@ -217,6 +240,11 @@ public final class ThresholdShootoutDialog {
         exportButton.addActionListener(new ActionListener() {
             @Override public void actionPerformed(ActionEvent e) {
                 exportCsv();
+            }
+        });
+        copyRecommendedButton.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                copyRecommendedValue();
             }
         });
         batchButton.addActionListener(new ActionListener() {
@@ -265,6 +293,17 @@ public final class ThresholdShootoutDialog {
         fieldConstraints.weightx = 1.0;
         fieldConstraints.fill = GridBagConstraints.HORIZONTAL;
         panel.add(component, fieldConstraints);
+    }
+
+    private void addThresholdModeRow(JPanel panel, int row) {
+        JPanel fields = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
+        fields.add(thresholdMode);
+        fields.add(new JLabel("Grid steps:"));
+        fields.add(gridSteps);
+        gridWarning.setFont(gridWarning.getFont().deriveFont(Font.PLAIN, 11f));
+        gridWarning.setVisible(false);
+        fields.add(gridWarning);
+        addSettingRow(panel, row, "Threshold mode:", fields);
     }
 
     private void addSizeRow(JPanel panel, int row) {
@@ -405,7 +444,12 @@ public final class ThresholdShootoutDialog {
         if (!results.isEmpty()) {
             table.setRowSelectionInterval(0, 0);
         }
-        if (statusLabel.getText() == null || statusLabel.getText().trim().isEmpty()
+        if (!failed
+                && selectedThresholdMode() == ShootoutSettings.ThresholdMode.AUTO_GRID
+                && hasSuccessfulRows(results)
+                && recommendedResult() == null) {
+            statusLabel.setText("no stable plateau found");
+        } else if (statusLabel.getText() == null || statusLabel.getText().trim().isEmpty()
                 || statusLabel.getText().startsWith("Running")) {
             statusLabel.setText(results.size() + " result row(s).");
         }
@@ -425,6 +469,7 @@ public final class ThresholdShootoutDialog {
         if (usesFixed(mode) && fixedValues.isEmpty()) {
             throw new IllegalArgumentException("Enter one or more fixed thresholds, for example 2000,5000.");
         }
+        int gridStepCount = ((Number) gridSteps.getValue()).intValue();
         double min = parseSize(minSize.getText(), "Minimum size", false);
         double max = parseSize(maxSize.getText(), "Maximum size", true);
         return new ShootoutSettings(
@@ -432,6 +477,7 @@ public final class ThresholdShootoutDialog {
                 mode,
                 methods,
                 fixedValues,
+                gridStepCount,
                 min,
                 max,
                 brightObjects.isSelected());
@@ -444,6 +490,9 @@ public final class ThresholdShootoutDialog {
         }
         if (MODE_AUTO_AND_FIXED.equals(selected)) {
             return ShootoutSettings.ThresholdMode.AUTO_AND_FIXED;
+        }
+        if (MODE_AUTO_GRID.equals(selected)) {
+            return ShootoutSettings.ThresholdMode.AUTO_GRID;
         }
         return ShootoutSettings.ThresholdMode.AUTO_METHODS;
     }
@@ -540,6 +589,21 @@ public final class ThresholdShootoutDialog {
             statusLabel.setText("Saved " + file.getName() + ".");
         } catch (Exception ex) {
             IJ.showMessage("Test Counts", "Could not export CSV:\n" + cleanMessage(ex));
+        }
+    }
+
+    private void copyRecommendedValue() {
+        ShootoutResult row = recommendedResult();
+        if (row == null || row.thresholdValue == null) {
+            IJ.showMessage("Test Counts", "Run an auto grid shootout with a recommended row first.");
+            return;
+        }
+        String value = formatNumber(row.thresholdValue.doubleValue());
+        try {
+            Toolkit.getDefaultToolkit().getSystemClipboard().setContents(new StringSelection(value), null);
+            statusLabel.setText("Copied recommended value " + value + ".");
+        } catch (RuntimeException ex) {
+            IJ.showMessage("Test Counts", "Could not copy the recommended value:\n" + cleanMessage(ex));
         }
     }
 
@@ -785,6 +849,25 @@ public final class ThresholdShootoutDialog {
         return tableModel.resultAt(modelRow);
     }
 
+    private ShootoutResult recommendedResult() {
+        for (ShootoutResult row : results) {
+            if (row != null && row.recommended) {
+                return row;
+            }
+        }
+        return null;
+    }
+
+    private static boolean hasSuccessfulRows(List<ShootoutResult> rows) {
+        if (rows == null) return false;
+        for (ShootoutResult row : rows) {
+            if (row != null && row.isSuccess()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private void updateControlState() {
         boolean busy = isBusy();
         ShootoutSettings.ThresholdMode mode = selectedThresholdMode();
@@ -792,11 +875,17 @@ public final class ThresholdShootoutDialog {
         thresholdMode.setEnabled(!busy);
         autoMethods.setEnabled(!busy && usesAuto(mode));
         fixedThresholds.setEnabled(!busy && usesFixed(mode));
+        gridSteps.setEnabled(!busy && mode == ShootoutSettings.ThresholdMode.AUTO_GRID);
+        gridWarning.setVisible(mode == ShootoutSettings.ThresholdMode.AUTO_GRID
+                && ((Number) gridSteps.getValue()).intValue() < 6);
         minSize.setEnabled(!busy);
         maxSize.setEnabled(!busy);
         brightObjects.setEnabled(!busy && usesAuto(mode));
         runButton.setEnabled(!busy);
         exportButton.setEnabled(!busy && !results.isEmpty());
+        copyRecommendedButton.setEnabled(!busy
+                && recommendedResult() != null
+                && recommendedResult().thresholdValue != null);
         batchButton.setEnabled(!busy);
         cancelBatchButton.setEnabled(isBatchBusy() && !batchCancelRequested);
 
@@ -994,6 +1083,39 @@ public final class ThresholdShootoutDialog {
                 case 7: return statusText(row);
                 default: return "";
             }
+        }
+    }
+
+    private static final class RecommendedVariantRenderer extends DefaultTableCellRenderer {
+        private final ResultTableModel model;
+
+        RecommendedVariantRenderer(ResultTableModel model) {
+            this.model = model;
+        }
+
+        @Override public Component getTableCellRendererComponent(
+                JTable table,
+                Object value,
+                boolean isSelected,
+                boolean hasFocus,
+                int row,
+                int column) {
+            Component component = super.getTableCellRendererComponent(
+                    table, value, isSelected, hasFocus, row, column);
+            if (component instanceof JLabel) {
+                JLabel label = (JLabel) component;
+                int modelRow = table.convertRowIndexToModel(row);
+                ShootoutResult result = model.resultAt(modelRow);
+                String text = value == null ? "" : value.toString();
+                if (result != null && result.recommended) {
+                    label.setText("\u2605 " + text);
+                    label.setToolTipText(result.recommendationReason);
+                } else {
+                    label.setText(text);
+                    label.setToolTipText(null);
+                }
+            }
+            return component;
         }
     }
 }

@@ -19,6 +19,8 @@ public final class ShootoutResult {
     public final ObjectCounter.CountSummary countSummary;
     public final Status status;
     public final String error;
+    public final boolean recommended;
+    public final String recommendationReason;
 
     private ShootoutResult(
             ShootoutSettings.CountingMode countingMode,
@@ -29,7 +31,9 @@ public final class ShootoutResult {
             ImagePlus maskPreview,
             ObjectCounter.CountSummary countSummary,
             Status status,
-            String error) {
+            String error,
+            boolean recommended,
+            String recommendationReason) {
         if (countingMode == null) {
             throw new IllegalArgumentException("countingMode must not be null");
         }
@@ -45,6 +49,9 @@ public final class ShootoutResult {
         if (status == Status.FAILED && (error == null || error.trim().isEmpty())) {
             throw new IllegalArgumentException("failed results need an error");
         }
+        if (recommended && (recommendationReason == null || recommendationReason.trim().isEmpty())) {
+            throw new IllegalArgumentException("recommended results need a reason");
+        }
 
         this.countingMode = countingMode;
         this.variant = variant;
@@ -56,6 +63,8 @@ public final class ShootoutResult {
         this.countSummary = countSummary;
         this.status = status;
         this.error = error;
+        this.recommended = recommended;
+        this.recommendationReason = recommendationReason == null ? "" : recommendationReason;
     }
 
     public static ShootoutResult success(
@@ -83,7 +92,9 @@ public final class ShootoutResult {
                 maskPreview,
                 countSummary,
                 Status.SUCCESS,
-                null);
+                null,
+                false,
+                "");
     }
 
     public static ShootoutResult failure(
@@ -110,10 +121,27 @@ public final class ShootoutResult {
                 null,
                 null,
                 Status.FAILED,
-                error);
+                error,
+                false,
+                "");
     }
 
     public boolean isSuccess() {
         return status == Status.SUCCESS;
+    }
+
+    public ShootoutResult withRecommendation(String reason) {
+        return new ShootoutResult(
+                countingMode,
+                variant,
+                thresholdValue,
+                imageMinimum,
+                imageMaximum,
+                maskPreview,
+                countSummary,
+                status,
+                error,
+                true,
+                reason);
     }
 }

@@ -28,6 +28,7 @@ public final class TestCountsManifest {
     public final List<ResultSnapshot> results;
     public final ResultSnapshot chosenVariant;
     public final SourceRef groundTruth;
+    public final ClickFitSnapshot clickFit;
 
     private TestCountsManifest(Builder builder) {
         this.schemaVersion = SCHEMA_VERSION;
@@ -46,6 +47,9 @@ public final class TestCountsManifest {
         this.results = immutableResults(builder.results);
         this.chosenVariant = builder.chosenVariant;
         this.groundTruth = builder.groundTruth;
+        this.clickFit = builder.clickFit == null
+                ? ClickFitSnapshot.from(this.settings, this.chosenVariant, this.results)
+                : builder.clickFit;
     }
 
     public static Builder builder() {
@@ -87,6 +91,11 @@ public final class TestCountsManifest {
             sb.append(",");
             sb.append(quote("groundTruth")).append(":");
             appendSourceRef(sb, groundTruth);
+        }
+        if (clickFit != null) {
+            sb.append(",");
+            sb.append(quote("clickFit")).append(":");
+            appendClickFit(sb, clickFit);
         }
         sb.append("}");
         return sb.toString();
@@ -192,6 +201,10 @@ public final class TestCountsManifest {
         appendIntegerArray(sb, "channelsToSweep", settings.channelsToSweep);
         sb.append(",");
         appendField(sb, "runFragilityChecks", Boolean.toString(settings.runFragilityChecks));
+        if (!settings.clickPoints.isEmpty()) {
+            sb.append(",");
+            appendPointArray(sb, "clickPoints", settings.clickPoints);
+        }
         if (settings.groundTruthObjectCount != null) {
             sb.append(",");
             appendField(sb, "groundTruthObjectCount", settings.groundTruthObjectCount.toString());
@@ -203,6 +216,18 @@ public final class TestCountsManifest {
         if (settings.groundTruthSourceName != null) {
             sb.append(",");
             appendField(sb, "groundTruthSourceName", quote(settings.groundTruthSourceName));
+        }
+        sb.append("}");
+    }
+
+    private static void appendClickFit(StringBuilder sb, ClickFitSnapshot clickFit) {
+        sb.append("{");
+        appendPointArray(sb, "points", clickFit.points);
+        if (clickFit.thresholdValue != null) {
+            appendNumberField(sb, "thresholdValue", clickFit.thresholdValue.doubleValue());
+        }
+        if (clickFit.variant != null) {
+            appendStringField(sb, "variant", clickFit.variant);
         }
         sb.append("}");
     }
@@ -290,6 +315,22 @@ public final class TestCountsManifest {
         sb.append("]");
     }
 
+    private static void appendPointArray(StringBuilder sb, String name, List<int[]> values) {
+        sb.append(quote(name)).append(":[");
+        for (int i = 0; values != null && i < values.size(); i++) {
+            if (i > 0) sb.append(",");
+            int[] point = values.get(i);
+            sb.append("[")
+                    .append(point[0])
+                    .append(",")
+                    .append(point[1])
+                    .append(",")
+                    .append(point[2])
+                    .append("]");
+        }
+        sb.append("]");
+    }
+
     private static void appendNumberField(StringBuilder sb, String name, double value) {
         if (!isFinite(value)) return;
         sb.append(",");
@@ -369,6 +410,7 @@ public final class TestCountsManifest {
         private List<ResultSnapshot> results = Collections.emptyList();
         private ResultSnapshot chosenVariant;
         private SourceRef groundTruth;
+        private ClickFitSnapshot clickFit;
 
         public Builder pluginVersion(String pluginVersion) {
             this.pluginVersion = pluginVersion;
@@ -453,6 +495,11 @@ public final class TestCountsManifest {
             return this;
         }
 
+        public Builder clickFit(ClickFitSnapshot clickFit) {
+            this.clickFit = clickFit;
+            return this;
+        }
+
         public TestCountsManifest build() {
             return new TestCountsManifest(this);
         }
@@ -507,6 +554,7 @@ public final class TestCountsManifest {
         public final boolean darkBackground;
         public final List<Integer> channelsToSweep;
         public final boolean runFragilityChecks;
+        public final List<int[]> clickPoints;
         public final Integer groundTruthObjectCount;
         public final String groundTruthSourceFormat;
         public final String groundTruthSourceName;
@@ -523,6 +571,7 @@ public final class TestCountsManifest {
             this.darkBackground = safe.darkBackground;
             this.channelsToSweep = Collections.unmodifiableList(new ArrayList<Integer>(safe.channelsToSweep));
             this.runFragilityChecks = safe.runFragilityChecks;
+            this.clickPoints = immutablePointCopy(safe.clickPoints);
             if (safe.groundTruthReference == null) {
                 this.groundTruthObjectCount = null;
                 this.groundTruthSourceFormat = null;
@@ -536,6 +585,49 @@ public final class TestCountsManifest {
 
         public static SettingsSnapshot from(ShootoutSettings settings) {
             return new SettingsSnapshot(settings);
+        }
+    }
+
+    public static final class ClickFitSnapshot {
+        public final List<int[]> points;
+        public final Double thresholdValue;
+        public final String variant;
+
+        public ClickFitSnapshot(List<int[]> points, Double thresholdValue, String variant) {
+            this.points = immutablePointCopy(points);
+            this.thresholdValue = thresholdValue;
+            this.variant = variant;
+        }
+
+        static ClickFitSnapshot from(
+                SettingsSnapshot settings,
+                ResultSnapshot chosenVariant,
+                List<ResultSnapshot> results) {
+            if (settings == null || settings.clickPoints.isEmpty()) {
+                return null;
+            }
+            ResultSnapshot row = isClickFit(chosenVariant) ? chosenVariant : firstClickFit(results);
+            return new ClickFitSnapshot(
+                    settings.clickPoints,
+                    row == null ? null : row.thresholdValue,
+                    row == null ? null : row.variant);
+        }
+
+        private static boolean isClickFit(ResultSnapshot row) {
+            return row != null && "CLICK_FIT".equals(row.source);
+        }
+
+        private static ResultSnapshot firstClickFit(List<ResultSnapshot> rows) {
+            if (rows == null) {
+                return null;
+            }
+            for (int i = 0; i < rows.size(); i++) {
+                ResultSnapshot row = rows.get(i);
+                if (isClickFit(row)) {
+                    return row;
+                }
+            }
+            return null;
         }
     }
 
@@ -621,5 +713,21 @@ public final class TestCountsManifest {
         private static Double finiteOrNull(double value) {
             return isFinite(value) ? Double.valueOf(value) : null;
         }
+    }
+
+    private static List<int[]> immutablePointCopy(List<int[]> values) {
+        if (values == null || values.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<int[]> copy = new ArrayList<int[]>(values.size());
+        for (int i = 0; i < values.size(); i++) {
+            int[] point = values.get(i);
+            if (point == null || point.length < 2) {
+                continue;
+            }
+            int z = point.length > 2 ? point[2] : 1;
+            copy.add(new int[]{point[0], point[1], Math.max(1, z)});
+        }
+        return Collections.unmodifiableList(copy);
     }
 }

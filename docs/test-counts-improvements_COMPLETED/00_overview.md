@@ -81,10 +81,10 @@ Stages 01–09 are the main programme. Stages 10–12 are post-MVP polish; numbe
 
 ## Known open questions
 
-- For ground-truth scoring (stage 05), default matching rule should be centroid-in-mask for point ROIs and IoU ≥ 0.5 for area ROIs. Confirm with one real dataset before locking in.
-- For the JSON sidecar (stage 09), settle on `.testcounts.json` extension and one schema version field. Bump the schema version on every additive change.
-- For the live slider (stage 10), 3D stacks need a "which slice does the preview show" decision; default to the active slice and offer a small slice scrubber next to the threshold slider.
-- For the back-solver (stage 12), the spread check (so the system can't over-fit to a handful of clicks) needs a concrete rule. Default proposal: variant must catch ≥ 90% of clicks and have a count within ±25% of the median variant count.
+- For ground-truth scoring (stage 05), default matching rule should be centroid-in-mask for point ROIs and IoU ≥ 0.5 for area ROIs. Confirm with one real dataset before locking in. STATUS: pending real-data validation by user (see `docs/loose-ends/DECISIONS.md`).
+- For the JSON sidecar (stage 09), settle on `.testcounts.json` extension and one schema version field. Bump the schema version on every additive change. STATUS: resolved by the Sidecar schema policy below (see `docs/loose-ends/DECISIONS.md`).
+- For the live slider (stage 10), 3D stacks need a "which slice does the preview show" decision; default to the active slice and offer a small slice scrubber next to the threshold slider. STATUS: pending real-data validation by user (see `docs/loose-ends/DECISIONS.md`).
+- For the back-solver (stage 12), the spread check (so the system can't over-fit to a handful of clicks) needs a concrete rule. Default proposal: variant must catch ≥ 90% of clicks and have a count within ±25% of the median variant count. STATUS: pending real-data validation by user (see `docs/loose-ends/DECISIONS.md`).
 
 ## CSV column order (cumulative)
 
@@ -280,3 +280,7 @@ Run `/do-step docs/test-counts-improvements/` to execute the first incomplete nu
 - `10_live-threshold-slider.md`: made live-slider gates verify LiveMaskBuilder coverage, fps/latency/window lifecycle/pin behaviour, added a manual smoke check for scrubbing, slice changes, pinning, closing, and downsampling, and added mitigations for short 16-bit ranges, non-finite floats, virtual stacks, large previews, HiDPI positioning, worker/EDT separation, and slider recursion.
 - `11_batch-heatmap.md`: made heatmap gates verify model and renderer tests, exact auto-open/toggle/drill-in/preferences/headless behaviour, added a manual smoke check for metrics, normalisation, drill-in, resize, and second-monitor use, and added mitigations for huge batches, render memory, missing files, IJ1/ImageJ2 classloaders, virtual drill-in, locale CSV parsing, HiDPI alignment, and viridis provenance.
 - `12_click-to-mark-backsolver.md`: made click-fit gates verify BackSolver and manifest tests, listener-count cleanup, source badge/star behaviour, headless purity, added a manual smoke check for click capture/cancel/3D sidecar/close cleanup, and added mitigations for multi-canvas capture, z recording, double-clicks, virtual stacks, large masks, non-finite floats, HiDPI coordinates, over-fit tuning, and spread-check fallback.
+
+## Sidecar schema policy
+
+`TestCountsManifest.SCHEMA_VERSION` is the versionCurrent value for `.testcounts.json`. Schema version 1 is the shipped schema. Any additive field bumps the next schema to 2; any renamed or removed field also bumps the schema version, using 3+ after the first additive bump. Readers must accept versionRead <= versionCurrent and reject newer sidecars with a clear message. Writers always stamp versionCurrent so newly written sidecars advertise the schema implemented by this plugin build.

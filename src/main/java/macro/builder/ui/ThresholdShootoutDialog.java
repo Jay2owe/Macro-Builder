@@ -25,6 +25,7 @@ import macro.builder.image.FilterExecutor;
 import macro.builder.image.dag.DagIR;
 import macro.builder.image.dag.DagToIjmEmitter;
 import macro.builder.macro.MacroApplier;
+import macro.builder.ui.batch.BatchHeatmapWindow;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
@@ -147,6 +148,7 @@ public final class ThresholdShootoutDialog {
     private final JButton exportButton = new JButton("Export CSV...");
     private final JButton copyRecommendedButton = new JButton("Copy recommended value");
     private final JButton batchButton = new JButton("Run batch...");
+    private final JButton openBatchHeatmapButton = new JButton("Open batch heatmap...");
     private final JButton cancelBatchButton = new JButton("Cancel batch");
 
     private List<ShootoutResult> results = Collections.emptyList();
@@ -330,6 +332,7 @@ public final class ThresholdShootoutDialog {
         left.add(exportButton);
         left.add(copyRecommendedButton);
         left.add(batchButton);
+        left.add(openBatchHeatmapButton);
         left.add(cancelBatchButton);
 
         JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
@@ -377,6 +380,11 @@ public final class ThresholdShootoutDialog {
         batchButton.addActionListener(new ActionListener() {
             @Override public void actionPerformed(ActionEvent e) {
                 runBatchShootout();
+            }
+        });
+        openBatchHeatmapButton.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                openBatchHeatmapFromCsv();
             }
         });
         cancelBatchButton.addActionListener(new ActionListener() {
@@ -1510,7 +1518,7 @@ public final class ThresholdShootoutDialog {
                             }
                         });
                 Files.write(csvFile.toPath(), BatchShootoutRunner.buildCsv(rows).getBytes(StandardCharsets.UTF_8));
-                return new BatchRunResult(rows, csvFile, batchCancelRequested);
+                return new BatchRunResult(rows, csvFile, batchCancelRequested, settings);
             }
 
             @Override protected void done() {
@@ -1593,6 +1601,21 @@ public final class ThresholdShootoutDialog {
         return ensureExtension(chooser.getSelectedFile(), ".csv");
     }
 
+    private void openBatchHeatmapFromCsv() {
+        JFileChooser chooser = new JFileChooser();
+        chooser.setDialogTitle("Open Batch Heatmap CSV");
+        chooser.addChoosableFileFilter(new FileNameExtensionFilter("CSV files (*.csv)", "csv"));
+        if (chooser.showOpenDialog(dialog) != JFileChooser.APPROVE_OPTION) return;
+
+        ShootoutSettings settings;
+        try {
+            settings = buildSettings();
+        } catch (IllegalArgumentException ignored) {
+            settings = ShootoutSettings.defaults();
+        }
+        BatchHeatmapWindow.openCsvAsync(dialog, chooser.getSelectedFile(), macro, settings);
+    }
+
     private void cancelBatchShootout() {
         if (!isBatchBusy()) return;
         batchCancelRequested = true;
@@ -1634,6 +1657,9 @@ public final class ThresholdShootoutDialog {
         statusLabel.setText(prefix + ": " + result.rows.size()
                 + " row(s) saved to " + result.csvFile.getName() + ".");
         setProgressValue(result.cancelled ? progressBar.getValue() : 100, prefix + ".");
+        if (!result.cancelled && !GraphicsEnvironment.isHeadless()) {
+            BatchHeatmapWindow.openCsvAsync(dialog, result.csvFile, macro, result.settings);
+        }
         updateControlState();
     }
 
@@ -1854,6 +1880,7 @@ public final class ThresholdShootoutDialog {
                 && recommendedResult() != null
                 && recommendedResult().thresholdValue != null);
         batchButton.setEnabled(!busy);
+        openBatchHeatmapButton.setEnabled(!busy);
         cancelBatchButton.setEnabled(isBatchBusy() && !batchCancelRequested);
 
         ShootoutResult selected = selectedResult();
@@ -2043,11 +2070,17 @@ public final class ThresholdShootoutDialog {
         final List<BatchShootoutResult> rows;
         final File csvFile;
         final boolean cancelled;
+        final ShootoutSettings settings;
 
-        BatchRunResult(List<BatchShootoutResult> rows, File csvFile, boolean cancelled) {
+        BatchRunResult(
+                List<BatchShootoutResult> rows,
+                File csvFile,
+                boolean cancelled,
+                ShootoutSettings settings) {
             this.rows = rows == null ? Collections.<BatchShootoutResult>emptyList() : rows;
             this.csvFile = csvFile;
             this.cancelled = cancelled;
+            this.settings = settings == null ? ShootoutSettings.defaults() : settings;
         }
     }
 

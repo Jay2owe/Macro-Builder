@@ -15,6 +15,7 @@ import macro.builder.analysis.GroundTruthLoader;
 import macro.builder.analysis.GroundTruthReference;
 import macro.builder.analysis.MethodsParagraphWriter;
 import macro.builder.analysis.ObjectCounter;
+import macro.builder.analysis.ShootoutContext;
 import macro.builder.analysis.ShootoutRun;
 import macro.builder.analysis.ShootoutResult;
 import macro.builder.analysis.ShootoutSettings;
@@ -139,6 +140,7 @@ public final class ThresholdShootoutDialog {
     private final JTable table = new JTable(tableModel);
     private final JButton runButton = new JButton("Run");
     private final JButton previewButton = new JButton("Open mask preview");
+    private final JButton scrubButton = new JButton("Scrub...");
     private final JButton applyToMacroButton = new JButton("Apply to macro");
     private final JButton copyMethodsButton = new JButton("Copy methods paragraph");
     private final JButton consensusButton = new JButton("Show consensus mask");
@@ -152,9 +154,11 @@ public final class ThresholdShootoutDialog {
     private ShootoutRun activeShootoutRun;
     private ShootoutSettings activeSettings;
     private ImagePlus activeMaskPreview;
+    private ScrubPane scrubPane;
     private ImagePlus activeConsensusMask;
     private ImagePlus activeConsensusPreview;
     private SwingWorker<ShootoutUiResult, Void> worker;
+    private SwingWorker<ShootoutResult, Void> pinWorker;
     private SwingWorker<BatchRunResult, Void> batchWorker;
     private SwingWorker<GroundTruthReference, Void> referenceWorker;
     private SwingWorker<File, Void> sidecarWorker;
@@ -317,6 +321,9 @@ public final class ThresholdShootoutDialog {
 
         JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
         left.add(previewButton);
+        if (!GraphicsEnvironment.isHeadless()) {
+            left.add(scrubButton);
+        }
         left.add(applyToMacroButton);
         left.add(copyMethodsButton);
         left.add(consensusButton);
@@ -335,6 +342,11 @@ public final class ThresholdShootoutDialog {
         previewButton.addActionListener(new ActionListener() {
             @Override public void actionPerformed(ActionEvent e) {
                 openMaskPreview();
+            }
+        });
+        scrubButton.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                openScrubPane();
             }
         });
         applyToMacroButton.addActionListener(new ActionListener() {
@@ -388,6 +400,10 @@ public final class ThresholdShootoutDialog {
             @Override public void windowClosed(WindowEvent e) {
                 closed = true;
                 batchCancelRequested = true;
+                if (pinWorker != null && !pinWorker.isDone()) {
+                    pinWorker.cancel(true);
+                }
+                closeScrubPane();
                 closeImageQuietly(activeMaskPreview);
                 activeMaskPreview = null;
                 closeImageQuietly(activeConsensusPreview);
@@ -611,6 +627,7 @@ public final class ThresholdShootoutDialog {
         notifySettings(settings);
         activeSettings = settings;
 
+        closeScrubPane();
         closeImageQuietly(activeMaskPreview);
         activeMaskPreview = null;
         closeImageQuietly(activeConsensusPreview);
@@ -968,6 +985,107 @@ public final class ThresholdShootoutDialog {
         activeMaskPreview = preview;
     }
 
+    private void openScrubPane() {
+        if (!canOpenScrubPane()) {
+            IJ.showMessage("Test Counts", "Run Test Counts successfully before scrubbing thresholds.");
+            return;
+        }
+        if (scrubPane != null && scrubPane.isDisplayable()) {
+            scrubPane.toFront();
+            return;
+        }
+        scrubPane = new ScrubPane(
+                dialog,
+                activeShootoutRun.context,
+                activeSettings,
+                results,
+                activeSliceForScrub(),
+                activeFrameForScrub(),
+                new ScrubPane.PinHandler() {
+                    @Override public void pinThreshold(double threshold) {
+                        pinScrubbedThreshold(threshold);
+                    }
+                });
+        scrubPane.open();
+    }
+
+    private void pinScrubbedThreshold(final double threshold) {
+        if (isBusy() || activeShootoutRun == null || activeShootoutRun.context == null || activeSettings == null) {
+            return;
+        }
+        final ShootoutSettings pinnedSettings;
+        try {
+            pinnedSettings = activeSettings.withAdditionalFixed(threshold);
+        } catch (IllegalArgumentException ex) {
+            IJ.showMessage("Test Counts", cleanMessage(ex));
+            return;
+        }
+        final ShootoutContext pinContext = activeShootoutRun.context;
+        activeSettings = pinnedSettings;
+        appendFixedThresholdText(threshold);
+        notifySettings(pinnedSettings);
+        if (scrubPane != null) {
+            scrubPane.setPinBusy(true);
+        }
+        statusLabel.setText("Pinning threshold " + formatNumber(threshold) + "...");
+        setProgressIndeterminate("Pinning threshold...");
+
+        pinWorker = new SwingWorker<ShootoutResult, Void>() {
+            @Override protected ShootoutResult doInBackground() {
+                return new ThresholdShootoutRunner().runOneVariant(
+                        pinContext,
+                        pinnedSettings,
+                        threshold);
+            }
+
+            @Override protected void done() {
+                onPinDone(this);
+            }
+        };
+        updateControlState();
+        pinWorker.execute();
+    }
+
+    private void onPinDone(SwingWorker<ShootoutResult, Void> finishedWorker) {
+        ShootoutResult row = null;
+        String failure = null;
+        try {
+            row = finishedWorker.get();
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            failure = "Pin interrupted.";
+        } catch (ExecutionException ex) {
+            failure = "Pin failed: " + cleanMessage(ex.getCause());
+        }
+
+        if (finishedWorker == pinWorker) {
+            pinWorker = null;
+        }
+        if (scrubPane != null) {
+            scrubPane.setPinBusy(false);
+        }
+        if (closed || !dialog.isDisplayable()) {
+            closeImageQuietly(row == null ? null : row.maskPreview);
+            return;
+        }
+
+        if (failure != null) {
+            statusLabel.setText(failure);
+            setProgressValue(0, "Pin failed.");
+            updateControlState();
+            return;
+        }
+
+        List<ShootoutResult> updated = new ArrayList<ShootoutResult>(results);
+        updated.add(row);
+        results = updated;
+        setTableResults(results, activeSettings != null && activeSettings.groundTruthReference != null);
+        selectModelRow(results.size() - 1);
+        statusLabel.setText("Pinned " + formatNumber(row.thresholdValue.doubleValue()) + ".");
+        setProgressValue(100, "Pinned.");
+        updateControlState();
+    }
+
     private void openConsensusMask() {
         if (!agreementColumnAvailable(results)) {
             IJ.showMessage("Test Counts", "At least 3 successful methods are needed for a consensus mask.");
@@ -1232,6 +1350,53 @@ public final class ThresholdShootoutDialog {
             }
         }
         return null;
+    }
+
+    private boolean canOpenScrubPane() {
+        return activeShootoutRun != null
+                && activeShootoutRun.context != null
+                && activeShootoutRun.context.processed != null
+                && activeSettings != null
+                && isFinite(activeShootoutRun.context.rangeMin)
+                && isFinite(activeShootoutRun.context.rangeMax)
+                && activeShootoutRun.context.rangeMax >= activeShootoutRun.context.rangeMin
+                && hasSuccessfulRows(results);
+    }
+
+    private int activeSliceForScrub() {
+        int slice = source == null ? 1 : source.getSlice();
+        int maxSlice = activeShootoutRun == null || activeShootoutRun.context == null
+                ? 1
+                : Math.max(1, activeShootoutRun.context.processed.getNSlices());
+        return Math.max(1, Math.min(maxSlice, slice));
+    }
+
+    private int activeFrameForScrub() {
+        int frame = source == null ? 1 : source.getFrame();
+        int maxFrame = activeShootoutRun == null || activeShootoutRun.context == null
+                ? 1
+                : Math.max(1, activeShootoutRun.context.processed.getNFrames());
+        return Math.max(1, Math.min(maxFrame, frame));
+    }
+
+    private void appendFixedThresholdText(double threshold) {
+        String value = formatNumber(threshold);
+        String text = fixedThresholds.getText();
+        if (text == null || text.trim().isEmpty()) {
+            fixedThresholds.setText(value);
+        } else {
+            fixedThresholds.setText(text.trim() + "," + value);
+        }
+    }
+
+    private void selectModelRow(int modelRow) {
+        if (modelRow < 0 || modelRow >= tableModel.getRowCount()) {
+            return;
+        }
+        int viewRow = table.convertRowIndexToView(modelRow);
+        if (viewRow >= 0) {
+            table.setRowSelectionInterval(viewRow, viewRow);
+        }
     }
 
     private File sourceImageFile(ImagePlus image) {
@@ -1658,6 +1823,13 @@ public final class ThresholdShootoutDialog {
                 row.fragilityCountRange);
     }
 
+    private static boolean isPinnedResult(ShootoutResult row) {
+        return row != null
+                && row.source == ShootoutResult.Source.FIXED
+                && row.variant != null
+                && row.variant.startsWith("Pinned ");
+    }
+
     private void updateControlState() {
         boolean busy = isBusy();
         ShootoutSettings.ThresholdMode mode = selectedThresholdMode();
@@ -1686,6 +1858,7 @@ public final class ThresholdShootoutDialog {
 
         ShootoutResult selected = selectedResult();
         previewButton.setEnabled(!busy && selected != null && selected.isSuccess() && selected.maskPreview != null);
+        scrubButton.setEnabled(!busy && canOpenScrubPane());
         applyToMacroButton.setEnabled(!busy && selected != null && selected.isSuccess());
         copyMethodsButton.setEnabled(!busy && selectedOrRecommendedResult() != null);
         boolean enoughAgreementRows = agreementColumnAvailable(results);
@@ -1701,11 +1874,15 @@ public final class ThresholdShootoutDialog {
     }
 
     private boolean isBusy() {
-        return isShootoutBusy() || isBatchBusy() || isReferenceBusy();
+        return isShootoutBusy() || isPinBusy() || isBatchBusy() || isReferenceBusy();
     }
 
     private boolean isShootoutBusy() {
         return worker != null && !worker.isDone();
+    }
+
+    private boolean isPinBusy() {
+        return pinWorker != null && !pinWorker.isDone();
     }
 
     private boolean isBatchBusy() {
@@ -1738,6 +1915,13 @@ public final class ThresholdShootoutDialog {
             if (row != null) {
                 closeImageQuietly(row.maskPreview);
             }
+        }
+    }
+
+    private void closeScrubPane() {
+        if (scrubPane != null) {
+            scrubPane.dispose();
+            scrubPane = null;
         }
     }
 
@@ -2079,7 +2263,12 @@ public final class ThresholdShootoutDialog {
                 int modelRow = table.convertRowIndexToModel(row);
                 ShootoutResult result = model.resultAt(modelRow);
                 String text = value == null ? "" : value.toString();
-                if (result != null && result.recommended) {
+                if (isPinnedResult(result)) {
+                    String prefix = result.recommended ? "&#9733; " : "";
+                    label.setText("<html>" + prefix + escapeHtml(text)
+                            + " <span style='font-size:9px;color:#555;'>pinned</span></html>");
+                    label.setToolTipText(result.recommended ? result.recommendationReason : "Pinned threshold");
+                } else if (result != null && result.recommended) {
                     label.setText("\u2605 " + text);
                     label.setToolTipText(result.recommendationReason);
                 } else {

@@ -234,6 +234,26 @@ public final class ShootoutSettings {
                 runFragilityChecks);
     }
 
+    public ShootoutSettings withAdditionalFixed(double value) {
+        if (Double.isNaN(value) || Double.isInfinite(value)) {
+            throw new IllegalArgumentException("fixed threshold must be finite");
+        }
+        List<Double> updated = new ArrayList<Double>(fixedThresholds);
+        updated.add(Double.valueOf(value));
+        return new ShootoutSettings(
+                countingMode,
+                thresholdMode,
+                autoMethods,
+                updated,
+                gridSteps,
+                minSize,
+                maxSize,
+                darkBackground,
+                channelsToSweep,
+                groundTruthReference,
+                runFragilityChecks);
+    }
+
     public static List<Integer> defaultChannelsToSweep() {
         return Collections.singletonList(Integer.valueOf(1));
     }

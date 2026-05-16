@@ -1,12 +1,14 @@
 package macro.builder.analysis;
 
 import ij.ImagePlus;
+import ij.gui.Roi;
 import ij.process.ByteProcessor;
 import macro.builder.analysis.ShootoutSettings.CountingMode;
 import macro.builder.analysis.ShootoutSettings.ThresholdMode;
 import org.junit.Test;
 
 import java.util.Collections;
+import java.util.Arrays;
 import java.util.List;
 
 import static org.junit.Assert.assertEquals;
@@ -64,6 +66,39 @@ public class ThresholdShootoutRunnerGridTest {
         assertEquals(8.0, thresholds.get(1).doubleValue(), 0.0001);
         assertEquals(11.0, thresholds.get(2).doubleValue(), 0.0001);
         assertEquals(14.0, thresholds.get(3).doubleValue(), 0.0001);
+    }
+
+    @Test
+    public void referenceLoadedRecommendsHighestF1Row() {
+        GroundTruthReference reference = new GroundTruthReference(
+                GroundTruthReference.SourceFormat.ROI_SET,
+                "synthetic",
+                Arrays.asList(
+                        GroundTruthReference.ReferenceObject.area(new Roi(1, 1, 2, 2), 1),
+                        GroundTruthReference.ReferenceObject.area(new Roi(8, 1, 2, 2), 2)));
+        ShootoutSettings settings = new ShootoutSettings(
+                CountingMode.PARTICLES_2D,
+                ThresholdMode.FIXED_VALUES,
+                Collections.<String>emptyList(),
+                Arrays.asList(Double.valueOf(100.0), Double.valueOf(255.0)),
+                ShootoutSettings.DEFAULT_GRID_STEPS,
+                0.0,
+                Double.POSITIVE_INFINITY,
+                true,
+                ShootoutSettings.defaultChannelsToSweep(),
+                reference);
+
+        List<ShootoutResult> rows = new ThresholdShootoutRunner().run(
+                twoObjectImage(),
+                "",
+                settings);
+
+        assertEquals(2, rows.size());
+        assertEquals(1.0, rows.get(0).f1, 1e-6);
+        assertTrue(rows.get(0).recommended);
+        assertEquals("highest agreement with your reference", rows.get(0).recommendationReason);
+        assertFalse(rows.get(1).recommended);
+        assertEquals(0.0, rows.get(1).f1, 1e-6);
     }
 
     private static ImagePlus twoObjectImage() {

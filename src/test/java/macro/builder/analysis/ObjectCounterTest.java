@@ -9,6 +9,7 @@ import macro.builder.analysis.ShootoutSettings.ThresholdMode;
 import org.junit.Test;
 
 import java.util.Collections;
+import java.util.List;
 
 import static org.junit.Assert.assertEquals;
 
@@ -29,6 +30,26 @@ public class ObjectCounterTest {
         assertEquals(2.5, summary.meanSize, 0.0001);
         assertEquals(5.0, summary.totalForeground, 0.0001);
         assertEquals(5.0 / 30.0, summary.coverage, 0.0001);
+    }
+
+    @Test
+    public void detectsAcceptedObjectCentroidsAndPixels() {
+        ByteProcessor mask = new ByteProcessor(6, 5);
+        set(mask, 1, 1);
+        set(mask, 1, 2);
+        set(mask, 4, 1);
+        set(mask, 4, 2);
+        set(mask, 5, 2);
+
+        List<DetectedObject> objects = ObjectCounter.detect(
+                new ImagePlus("mask", mask),
+                settings(CountingMode.PARTICLES_2D, 0, Double.POSITIVE_INFINITY));
+
+        assertEquals(2, objects.size());
+        assertEquals(2, objects.get(0).area);
+        assertEquals(1.0, objects.get(0).centroidX, 0.0001);
+        assertEquals(1.5, objects.get(0).centroidY, 0.0001);
+        assertEquals(3, objects.get(1).pixels.length);
     }
 
     @Test

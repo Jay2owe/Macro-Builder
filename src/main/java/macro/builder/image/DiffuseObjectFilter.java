@@ -1,37 +1,43 @@
 package macro.builder.image;
 
-import ij.IJ;
 import ij.ImagePlus;
 import ij.ImageStack;
-import ij.WindowManager;
-
-import java.util.HashSet;
-import java.util.Set;
-import java.util.concurrent.atomic.AtomicInteger;
+import ij.measure.Calibration;
+import ij.plugin.GaussianBlur3D;
+import ij.process.Blitter;
+import ij.process.ImageProcessor;
 
 /**
- * Runs the Diffuse Object Filter macro safely.
+ * Runs the Diffuse Object Filter directly on image pixels.
  * <p>
- * The macro builds a Difference-of-Gaussians by duplicating the input twice
- * ({@code DoG_small} and {@code DoG_big}), blurring each, subtracting via
- * {@code imageCalculator}, renaming the result to {@code DoG_result}, and
- * applying a 3D median. The original input is left untouched. We orchestrate
- * the multi-image flow so {@code imp} receives the final {@code DoG_result}
- * pixels and all intermediate windows are closed.
+ * The bundled preset builds a Difference-of-Gaussians by duplicating the input
+ * twice ({@code DoG_small} and {@code DoG_big}), blurring each duplicate with
+ * the preset's 3D Gaussian sigmas, subtracting the big blur from the small blur
+ * slice-by-slice, then applying a 3D median. This implementation mirrors that
+ * sequence without showing images or touching {@code WindowManager}; the source
+ * image's stack is replaced only once the output stack is complete.
  * <p>
- * Native DAG execution (without {@link WindowManager}) arrives in stage 03;
- * until then this compound handler keeps batch runs safe by routing through
- * a known macro path. Caller MUST hold {@link WindowManagerLock#LOCK}.
+ * Peak memory is estimated as input + two blur duplicates + one subtraction
+ * result. If that exceeds 256 MiB, subtraction falls back to an in-place
+ * slice-by-slice pass on the small-blur stack instead of materialising a third
+ * full working stack.
  */
 public final class DiffuseObjectFilter {
 
     private DiffuseObjectFilter() {}
 
-    /** Counter for unique window titles to avoid collisions in parallel mode. */
-    private static final AtomicInteger EXEC_COUNTER = new AtomicInteger(0);
+    /** Values mirror src/main/resources/named-filters/diffuse_object_filter.ijm. */
+    private static final double SMALL_SIGMA_XY = 2.0;
+    private static final double SMALL_SIGMA_Z = 1.0;
+    private static final double BIG_SIGMA_XY = 15.0;
+    private static final double BIG_SIGMA_Z = 4.0;
+    private static final float MEDIAN_RADIUS_X = 1.0f;
+    private static final float MEDIAN_RADIUS_Y = 1.0f;
+    private static final float MEDIAN_RADIUS_Z = 1.0f;
+    private static final long MEMORY_LIMIT_BYTES = 256L * 1024L * 1024L;
 
     /**
-     * True when {@code macroContent} is the bundled Diffuse Object filter — uses
+     * True when {@code macroContent} is the bundled Diffuse Object filter - uses
      * the distinctive {@code DoG_small}/{@code DoG_big}/{@code Subtract create stack}
      * triplet that no other bundled preset emits.
      */
@@ -43,70 +49,99 @@ public final class DiffuseObjectFilter {
     }
 
     public static void apply(ImagePlus imp, String macroContent) {
-        // Use a unique title so concurrent calls on same channel name don't collide.
-        String originalTitle = imp.getTitle();
-        String uniqueTitle = originalTitle + "__dof_" + EXEC_COUNTER.incrementAndGet();
-        imp.setTitle(uniqueTitle);
+        if (imp == null || imp.getStack() == null || imp.getStackSize() == 0) return;
 
-        // Patch the macro: replace `original = getTitle();` so the macro picks up
-        // our unique title rather than re-querying after we hide the window. Most
-        // bundled presets use getTitle() at top-of-file which is safe, but this
-        // guards against macros that re-read getTitle() mid-flow.
-        String safeMacro = macroContent;
+        int channels = Math.max(1, imp.getNChannels());
+        int slices = Math.max(1, imp.getNSlices());
+        int frames = Math.max(1, imp.getNFrames());
+        boolean openAsHyperStack = imp.isHyperStack();
+        Calibration calibration = imp.getCalibration() == null ? null : imp.getCalibration().copy();
 
-        Set<Integer> preExisting = new HashSet<Integer>();
-        int[] preIds = WindowManager.getIDList();
-        if (preIds != null) {
-            for (int id : preIds) preExisting.add(id);
+        ImagePlus small = duplicateStack(imp, "DoG_small");
+        ImagePlus big = duplicateStack(imp, "DoG_big");
+
+        GaussianBlur3D.blur(small, SMALL_SIGMA_XY, SMALL_SIGMA_XY, SMALL_SIGMA_Z);
+        GaussianBlur3D.blur(big, BIG_SIGMA_XY, BIG_SIGMA_XY, BIG_SIGMA_Z);
+
+        ImageStack dogStack = estimatedPeakBytes(imp) > MEMORY_LIMIT_BYTES
+                ? subtractInPlace(small.getStack(), big.getStack())
+                : subtractToNewStack(small.getStack(), big.getStack());
+        boolean dogUsesSmallStack = dogStack == small.getStack();
+        big.flush();
+        if (!dogUsesSmallStack) {
+            small.flush();
         }
 
-        try {
-            imp.show();
-            imp.setActivated();
+        ImageStack medianStack = ij.plugin.Filters3D.filter(
+                dogStack,
+                ij.plugin.Filters3D.MEDIAN,
+                MEDIAN_RADIUS_X,
+                MEDIAN_RADIUS_Y,
+                MEDIAN_RADIUS_Z);
+        if (medianStack != null) {
+            dogStack = medianStack;
+        }
 
-            IJ.runMacro(safeMacro);
+        imp.setStack(dogStack);
+        if (channels * slices * frames == dogStack.getSize()) {
+            imp.setDimensions(channels, slices, frames);
+            if (openAsHyperStack) imp.setOpenAsHyperStack(true);
+        }
+        if (calibration != null) {
+            imp.setCalibration(calibration);
+        }
+    }
 
-            // Adopt result: prefer "DoG_result" (the macro renames it), fall back
-            // to the active image (in case the rename was changed by the user).
-            ImagePlus result = WindowManager.getImage("DoG_result");
-            if (result == null || result == imp) {
-                result = WindowManager.getCurrentImage();
-            }
-            if (result != null && result != imp && result.getStackSize() > 0) {
-                ImageStack rs = result.getStack();
-                ImageStack copy = new ImageStack(rs.getWidth(), rs.getHeight());
-                for (int s = 1; s <= rs.getSize(); s++) {
-                    copy.addSlice(rs.getProcessor(s).duplicate());
-                }
-                imp.setStack(copy);
-                imp.setDimensions(result.getNChannels(), result.getNSlices(), result.getNFrames());
-                if (result.getCalibration() != null) {
-                    imp.setCalibration(result.getCalibration());
-                }
-            }
-        } finally {
-            // Hide imp's window (preserves pixel data, removes from WM).
-            imp.changes = false;
-            if (imp.getWindow() != null) {
-                imp.hide();
-            }
+    private static ImagePlus duplicateStack(ImagePlus source, String title) {
+        ImageStack src = source.getStack();
+        ImageStack copy = new ImageStack(source.getWidth(), source.getHeight());
+        for (int s = 1; s <= src.getSize(); s++) {
+            copy.addSlice(src.getSliceLabel(s), src.getProcessor(s).duplicate());
+        }
+        ImagePlus out = new ImagePlus(title, copy);
+        if (source.getCalibration() != null) {
+            out.setCalibration(source.getCalibration().copy());
+        }
+        int channels = Math.max(1, source.getNChannels());
+        int slices = Math.max(1, source.getNSlices());
+        int frames = Math.max(1, source.getNFrames());
+        if (channels * slices * frames == copy.getSize()) {
+            out.setDimensions(channels, slices, frames);
+            if (source.isHyperStack()) out.setOpenAsHyperStack(true);
+        }
+        return out;
+    }
 
-            // Close every window the macro created.
-            int[] postIds = WindowManager.getIDList();
-            if (postIds != null) {
-                for (int id : postIds) {
-                    if (preExisting.contains(id)) continue;
-                    ImagePlus w = WindowManager.getImage(id);
-                    if (w != null && w != imp) {
-                        w.changes = false;
-                        w.close();
-                    }
-                }
-            }
+    private static ImageStack subtractToNewStack(ImageStack small, ImageStack big) {
+        ImageStack out = new ImageStack(small.getWidth(), small.getHeight());
+        for (int s = 1; s <= small.getSize(); s++) {
+            ImageProcessor result = small.getProcessor(s).duplicate();
+            result.copyBits(big.getProcessor(s), 0, 0, Blitter.SUBTRACT);
+            out.addSlice(small.getSliceLabel(s), result);
+        }
+        return out;
+    }
 
-            imp.setTitle(originalTitle);
+    private static ImageStack subtractInPlace(ImageStack small, ImageStack big) {
+        for (int s = 1; s <= small.getSize(); s++) {
+            small.getProcessor(s).copyBits(big.getProcessor(s), 0, 0, Blitter.SUBTRACT);
+        }
+        return small;
+    }
+
+    private static long estimatedPeakBytes(ImagePlus imp) {
+        long pixels = (long) imp.getWidth() * (long) imp.getHeight() * (long) imp.getStackSize();
+        long bytesPerStack = pixels * bytesPerPixel(imp.getBitDepth());
+        return bytesPerStack * 4L;
+    }
+
+    private static int bytesPerPixel(int bitDepth) {
+        switch (bitDepth) {
+            case 8: return 1;
+            case 16: return 2;
+            case 24: return 4;
+            case 32: return 4;
+            default: return 4;
         }
     }
 }
-
-

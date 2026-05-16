@@ -269,7 +269,7 @@ public final class FilterExecutor {
         Boolean dagResult = runEmbeddedDagIfPresent(imp, macroContent, callback);
         if (dagResult != null) return dagResult.booleanValue();
 
-        // Known compound filters — run under window lock
+        // Known compound filters with legacy WindowManager flows run under the window lock.
         if (PunctaResolveFilter.matches(macroContent)) {
             callback.setIndeterminate("Running Puncta Resolve filter...");
             WindowManagerLock.LOCK.lock();
@@ -283,12 +283,7 @@ public final class FilterExecutor {
         }
         if (DiffuseObjectFilter.matches(macroContent)) {
             callback.setIndeterminate("Running diffuse object filter...");
-            WindowManagerLock.LOCK.lock();
-            try {
-                DiffuseObjectFilter.apply(imp, macroContent);
-            } finally {
-                WindowManagerLock.LOCK.unlock();
-            }
+            DiffuseObjectFilter.apply(imp, macroContent);
             callback.setProgress(1, 1, "Diffuse object filter complete.");
             return true;
         }
@@ -434,12 +429,7 @@ public final class FilterExecutor {
                 return true;
             }
             if (DiffuseObjectFilter.matches(content)) {
-                WindowManagerLock.LOCK.lock();
-                try {
-                    DiffuseObjectFilter.apply(imp, content);
-                } finally {
-                    WindowManagerLock.LOCK.unlock();
-                }
+                DiffuseObjectFilter.apply(imp, content);
                 return true;
             }
 

@@ -97,9 +97,9 @@ Click `Export CSV...` to save the current single-image count table.
 
 ## Batch Count Testing
 
-In the `Test Counts` dialog, click `Run batch...` to run the same macro and count settings on selected image files or a selected folder. This is a count-validation workflow, not the macro-output TIFF workflow above. The batch run writes a CSV file with one row per input file and threshold variant. The CSV includes file metadata, count settings, threshold value, count, mean size, coverage, macro output range, status, and any error message.
+In the `Test Counts` dialog, click `Run batch...` to run the same macro and count settings on selected image files or a selected folder. This is a count-validation workflow, not the macro-output TIFF workflow above. Before the CSV is written, choose the channels to sweep; the current primary channel is selected by default. The batch run writes a CSV file with one row per input file, Bio-Formats series, selected channel, and threshold variant. The CSV includes file metadata, count settings, threshold value, count, mean size, coverage, macro output range, status, any error message, `series_index`, and `channel_index`.
 
-Batch count testing supports ordinary image files such as TIFF, PNG, JPEG, GIF, BMP, ICS, and IDS. Bio-Formats containers are skipped in batch mode; open those files individually first if you need the Bio-Formats series chooser.
+Batch count testing supports ordinary image files such as TIFF, PNG, JPEG, GIF, BMP, ICS, and IDS. It also expands Bio-Formats containers such as LIF, CZI, ND2, OIB, OIF, LSM, ZVI, and OME-TIFF into one CSV group per series when Fiji's Bio-Formats plugin is available.
 
 ## Save A Batch Macro
 

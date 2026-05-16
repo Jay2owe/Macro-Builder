@@ -19,6 +19,8 @@ public final class BatchShootoutResult {
     public final int channels;
     public final int slices;
     public final int frames;
+    public final int seriesIndex;
+    public final int channelIndex;
     public final ShootoutSettings.CountingMode countingMode;
     public final String variant;
     public final Double thresholdValue;
@@ -36,6 +38,8 @@ public final class BatchShootoutResult {
             int channels,
             int slices,
             int frames,
+            int seriesIndex,
+            int channelIndex,
             ShootoutSettings.CountingMode countingMode,
             String variant,
             Double thresholdValue,
@@ -56,6 +60,12 @@ public final class BatchShootoutResult {
         if (status == Status.FAILED && (error == null || error.trim().isEmpty())) {
             throw new IllegalArgumentException("failed results need an error");
         }
+        if (seriesIndex < -1) {
+            throw new IllegalArgumentException("seriesIndex must be -1 or greater");
+        }
+        if (channelIndex < 0) {
+            throw new IllegalArgumentException("channelIndex must be zero or greater");
+        }
 
         this.file = file;
         this.filePath = file == null ? "" : file.getAbsolutePath();
@@ -65,6 +75,8 @@ public final class BatchShootoutResult {
         this.channels = channels;
         this.slices = slices;
         this.frames = frames;
+        this.seriesIndex = seriesIndex;
+        this.channelIndex = channelIndex;
         this.countingMode = countingMode;
         this.variant = variant == null ? "" : variant;
         this.thresholdValue = thresholdValue;
@@ -76,6 +88,15 @@ public final class BatchShootoutResult {
     }
 
     public static BatchShootoutResult from(File file, ImagePlus image, ShootoutResult result) {
+        return from(file, image, result, -1, 1);
+    }
+
+    public static BatchShootoutResult from(
+            File file,
+            ImagePlus image,
+            ShootoutResult result,
+            int seriesIndex,
+            int channelIndex) {
         if (image == null) {
             throw new IllegalArgumentException("image must not be null");
         }
@@ -90,6 +111,8 @@ public final class BatchShootoutResult {
                 Math.max(1, image.getNChannels()),
                 Math.max(1, image.getNSlices()),
                 Math.max(1, image.getNFrames()),
+                seriesIndex,
+                channelIndex,
                 result.countingMode,
                 result.variant,
                 result.thresholdValue,
@@ -104,6 +127,15 @@ public final class BatchShootoutResult {
             File file,
             ShootoutSettings.CountingMode countingMode,
             String error) {
+        return failure(file, countingMode, error, -1, 1);
+    }
+
+    public static BatchShootoutResult failure(
+            File file,
+            ShootoutSettings.CountingMode countingMode,
+            String error,
+            int seriesIndex,
+            int channelIndex) {
         return new BatchShootoutResult(
                 file,
                 "",
@@ -112,6 +144,38 @@ public final class BatchShootoutResult {
                 0,
                 0,
                 0,
+                seriesIndex,
+                channelIndex,
+                countingMode,
+                "",
+                null,
+                Double.NaN,
+                Double.NaN,
+                null,
+                Status.FAILED,
+                cleanMessage(error));
+    }
+
+    public static BatchShootoutResult failure(
+            File file,
+            ImagePlus image,
+            ShootoutSettings.CountingMode countingMode,
+            String error,
+            int seriesIndex,
+            int channelIndex) {
+        if (image == null) {
+            return failure(file, countingMode, error, seriesIndex, channelIndex);
+        }
+        return new BatchShootoutResult(
+                file,
+                imageTitle(image),
+                image.getWidth(),
+                image.getHeight(),
+                Math.max(1, image.getNChannels()),
+                Math.max(1, image.getNSlices()),
+                Math.max(1, image.getNFrames()),
+                seriesIndex,
+                channelIndex,
                 countingMode,
                 "",
                 null,

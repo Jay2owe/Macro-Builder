@@ -610,14 +610,13 @@ public final class ThresholdShootoutDialog {
     private void runBatchShootout() {
         if (isBusy()) return;
 
-        final ShootoutSettings settings;
+        final ShootoutSettings baseSettings;
         try {
-            settings = buildSettings();
+            baseSettings = buildSettings();
         } catch (IllegalArgumentException ex) {
             IJ.showMessage("Test Counts", cleanMessage(ex));
             return;
         }
-        notifySettings(settings);
 
         List<File> selectedInputs = chooseBatchInputs();
         if (selectedInputs.isEmpty()) return;
@@ -626,6 +625,11 @@ public final class ThresholdShootoutDialog {
             IJ.showMessage("Test Counts", "No ordinary image files or Bio-Formats containers were selected.");
             return;
         }
+
+        List<Integer> selectedChannels = chooseBatchChannels();
+        if (selectedChannels == null) return;
+        final ShootoutSettings settings = baseSettings.withChannelsToSweep(selectedChannels);
+        notifySettings(settings);
 
         final File csvFile = chooseBatchCsvFile();
         if (csvFile == null) return;
@@ -639,7 +643,7 @@ public final class ThresholdShootoutDialog {
                         batchFiles,
                         macro,
                         settings,
-                        primaryChannel,
+                        firstChannel(selectedChannels),
                         new BatchShootoutRunner.Progress() {
                             @Override public void onStarted(int totalFiles) {
                                 setBatchProgress(0, totalFiles, "Batch count shootout: "
@@ -651,6 +655,21 @@ public final class ThresholdShootoutDialog {
                                 setBatchProgress(index - 1, totalFiles,
                                         "Batch " + index + "/" + totalFiles + ": " + file.getName());
                                 setBatchStatus("Batch " + index + "/" + totalFiles + ": " + file.getName());
+                            }
+
+                            @Override public void onChannelStarted(
+                                    File file,
+                                    int index,
+                                    int totalFiles,
+                                    int seriesIndex,
+                                    int totalSeries,
+                                    int channel) {
+                                String name = file == null ? "batch item" : file.getName();
+                                String text = "file " + index + "/" + totalFiles
+                                        + ", series " + seriesIndex + "/" + totalSeries
+                                        + ", channel C" + channel + ": " + name;
+                                setBatchProgress(index - 1, totalFiles, text);
+                                setBatchStatus(text);
                             }
 
                             @Override public void onFileFinished(
@@ -700,6 +719,47 @@ public final class ThresholdShootoutDialog {
             inputs.add(chooser.getSelectedFile());
         }
         return inputs;
+    }
+
+    private List<Integer> chooseBatchChannels() {
+        int maxChannels = source == null ? primaryChannel : Math.max(primaryChannel, source.getNChannels());
+        maxChannels = Math.max(1, maxChannels);
+
+        JPanel panel = new JPanel(new BorderLayout(0, 6));
+        panel.add(new JLabel("Primary channel: C" + primaryChannel), BorderLayout.NORTH);
+
+        JPanel chips = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
+        final List<JCheckBox> boxes = new ArrayList<JCheckBox>();
+        for (int channel = 1; channel <= maxChannels; channel++) {
+            JCheckBox box = new JCheckBox("C" + channel, channel == primaryChannel);
+            box.setOpaque(false);
+            boxes.add(box);
+            chips.add(box);
+        }
+        panel.add(chips, BorderLayout.CENTER);
+
+        while (true) {
+            int choice = JOptionPane.showConfirmDialog(
+                    dialog,
+                    panel,
+                    "Channels to sweep",
+                    JOptionPane.OK_CANCEL_OPTION,
+                    JOptionPane.PLAIN_MESSAGE);
+            if (choice != JOptionPane.OK_OPTION) {
+                return null;
+            }
+
+            List<Integer> selected = new ArrayList<Integer>();
+            for (int i = 0; i < boxes.size(); i++) {
+                if (boxes.get(i).isSelected()) {
+                    selected.add(Integer.valueOf(i + 1));
+                }
+            }
+            if (!selected.isEmpty()) {
+                return selected;
+            }
+            IJ.showMessage("Test Counts", "Select at least one channel to sweep.");
+        }
     }
 
     private File chooseBatchCsvFile() {
@@ -957,6 +1017,13 @@ public final class ThresholdShootoutDialog {
             sb.append(values.get(i));
         }
         return sb.toString();
+    }
+
+    private static int firstChannel(List<Integer> channels) {
+        if (channels == null || channels.isEmpty() || channels.get(0) == null) {
+            return 1;
+        }
+        return Math.max(1, channels.get(0).intValue());
     }
 
     private static String countModeLabel(ShootoutSettings.CountingMode mode) {

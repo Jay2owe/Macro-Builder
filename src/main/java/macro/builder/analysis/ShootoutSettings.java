@@ -34,6 +34,7 @@ public final class ShootoutSettings {
     public final double minSize;
     public final double maxSize;
     public final boolean darkBackground;
+    public final List<Integer> channelsToSweep;
 
     public ShootoutSettings(
             CountingMode countingMode,
@@ -51,7 +52,8 @@ public final class ShootoutSettings {
                 DEFAULT_GRID_STEPS,
                 minSize,
                 maxSize,
-                darkBackground);
+                darkBackground,
+                defaultChannelsToSweep());
     }
 
     public ShootoutSettings(
@@ -63,6 +65,28 @@ public final class ShootoutSettings {
             double minSize,
             double maxSize,
             boolean darkBackground) {
+        this(
+                countingMode,
+                thresholdMode,
+                autoMethods,
+                fixedThresholds,
+                gridSteps,
+                minSize,
+                maxSize,
+                darkBackground,
+                defaultChannelsToSweep());
+    }
+
+    public ShootoutSettings(
+            CountingMode countingMode,
+            ThresholdMode thresholdMode,
+            List<String> autoMethods,
+            List<Double> fixedThresholds,
+            int gridSteps,
+            double minSize,
+            double maxSize,
+            boolean darkBackground,
+            List<Integer> channelsToSweep) {
         if (countingMode == null) {
             throw new IllegalArgumentException("countingMode must not be null");
         }
@@ -88,6 +112,7 @@ public final class ShootoutSettings {
         this.minSize = minSize;
         this.maxSize = maxSize;
         this.darkBackground = darkBackground;
+        this.channelsToSweep = immutableChannelCopy(channelsToSweep);
     }
 
     public static ShootoutSettings defaults() {
@@ -99,7 +124,25 @@ public final class ShootoutSettings {
                 DEFAULT_GRID_STEPS,
                 0.0,
                 Double.POSITIVE_INFINITY,
-                true);
+                true,
+                defaultChannelsToSweep());
+    }
+
+    public ShootoutSettings withChannelsToSweep(List<Integer> channels) {
+        return new ShootoutSettings(
+                countingMode,
+                thresholdMode,
+                autoMethods,
+                fixedThresholds,
+                gridSteps,
+                minSize,
+                maxSize,
+                darkBackground,
+                channels);
+    }
+
+    public static List<Integer> defaultChannelsToSweep() {
+        return Collections.singletonList(Integer.valueOf(1));
     }
 
     public static List<String> defaultAutoMethods() {
@@ -166,6 +209,25 @@ public final class ShootoutSettings {
                 throw new IllegalArgumentException("fixedThresholds must not contain null or NaN");
             }
             copy.add(value);
+        }
+        return Collections.unmodifiableList(copy);
+    }
+
+    private static List<Integer> immutableChannelCopy(List<Integer> values) {
+        if (values == null || values.isEmpty()) {
+            return defaultChannelsToSweep();
+        }
+        List<Integer> copy = new ArrayList<Integer>(values.size());
+        for (Integer value : values) {
+            if (value == null || value.intValue() < 1) {
+                throw new IllegalArgumentException("channelsToSweep must contain positive 1-based channels");
+            }
+            if (!copy.contains(value)) {
+                copy.add(value);
+            }
+        }
+        if (copy.isEmpty()) {
+            return defaultChannelsToSweep();
         }
         return Collections.unmodifiableList(copy);
     }

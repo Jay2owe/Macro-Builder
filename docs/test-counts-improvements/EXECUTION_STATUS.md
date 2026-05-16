@@ -32,3 +32,6 @@ W7 - 08_method-agreement: completed at 2026-05-16T19:43:21.0089688+01:00 (commit
 W8 - 09_macro-roundtrip-and-sidecar: FAILED at 2026-05-16T18:49:19Z (reason: codex agent surrendered turn before making changes; no commit, no file rename)
 W8 - 09_macro-roundtrip-and-sidecar: completed (corrective) at 2026-05-16T20:09:08.2040430+01:00 (commit 1b13275)
 W9 - 10_live-threshold-slider: completed at 2026-05-16T20:22:41.9760267+01:00 (commit 2ffff0f)
+W10 - 11_batch-heatmap: completed at 2026-05-16T20:36:00+01:00 (commit 614b926) [status line patched in by orchestrator — agent commit + rename were correct]
+W11 - 12_click-to-mark-backsolver: FAILED at 2026-05-16T20:54:04.5430756+01:00 (reason: Maven compile failed: KeyEventDispatcher import uses java.awt.event instead of java.awt)
+W11 - 12_click-to-mark-backsolver: completed (corrective) at 2026-05-16T20:57:54.2200831+01:00 (commit f5a3f76)

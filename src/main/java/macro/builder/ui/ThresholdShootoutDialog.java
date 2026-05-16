@@ -89,6 +89,8 @@ public final class ThresholdShootoutDialog {
             "How cleanly this threshold splits the bright and dim parts of the image. 0 means total overlap; 1 means perfectly separated.";
     private static final String DISTINCTNESS_TOOLTIP =
             "How different the two groups look as distributions. 0 means identical; 1 means as distinct as possible.";
+    private static final String FRAGILITY_TOOLTIP =
+            "How much the count changes if the threshold or image brightness moves slightly. Lower is steadier.";
 
     private final ImagePlus source;
     private final String macro;
@@ -104,6 +106,7 @@ public final class ThresholdShootoutDialog {
     private final JLabel referenceLabel = new JLabel("no reference");
     private final JCheckBox accessiblePalette = new JCheckBox("Colour-blind-safe preview colours");
     private final JCheckBox showQualityColumns = new JCheckBox("Show quality columns");
+    private final JCheckBox runFragilityChecks = new JCheckBox("Run fragility checks", true);
     private final JSpinner gridSteps = new JSpinner(new SpinnerNumberModel(
             ShootoutSettings.DEFAULT_GRID_STEPS,
             ShootoutSettings.MIN_GRID_STEPS,
@@ -209,6 +212,7 @@ public final class ThresholdShootoutDialog {
         addSizeRow(settings, row++);
         addCheckboxRow(settings, row++, brightObjects);
         addCheckboxRow(settings, row++, showQualityColumns);
+        addCheckboxRow(settings, row++, runFragilityChecks);
         addRangeRow(settings, row);
 
         thresholdMode.addActionListener(new ActionListener() {
@@ -222,6 +226,11 @@ public final class ThresholdShootoutDialog {
             }
         });
         showQualityColumns.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                setTableResults(results, groundTruthReference != null);
+            }
+        });
+        runFragilityChecks.addActionListener(new ActionListener() {
             @Override public void actionPerformed(ActionEvent e) {
                 setTableResults(results, groundTruthReference != null);
             }
@@ -434,7 +443,9 @@ public final class ThresholdShootoutDialog {
             TableCellRenderer defaultRenderer = header.getDefaultRenderer();
             for (int i = 0; i < table.getColumnModel().getColumnCount(); i++) {
                 String name = table.getColumnName(i);
-                if (isScoreColumnName(name)) {
+                if ("Fragility".equals(name)) {
+                    table.getColumnModel().getColumn(i).setCellRenderer(new FragilityBarRenderer());
+                } else if (isScoreColumnName(name)) {
                     table.getColumnModel().getColumn(i).setCellRenderer(scoreRenderer);
                 }
                 String tooltip = tooltipForColumnName(name);
@@ -447,8 +458,8 @@ public final class ThresholdShootoutDialog {
         TableRowSorter<ResultTableModel> sorter = new TableRowSorter<ResultTableModel>(tableModel);
         Comparator<Object> scoreComparator = new Comparator<Object>() {
             @Override public int compare(Object a, Object b) {
-                double left = a instanceof Number ? ((Number) a).doubleValue() : Double.NaN;
-                double right = b instanceof Number ? ((Number) b).doubleValue() : Double.NaN;
+                double left = sortableScore(a);
+                double right = sortableScore(b);
                 if (Double.isNaN(left) && Double.isNaN(right)) return 0;
                 if (Double.isNaN(left)) return 1;
                 if (Double.isNaN(right)) return -1;
@@ -456,7 +467,9 @@ public final class ThresholdShootoutDialog {
             }
         };
         for (int i = 0; i < tableModel.getColumnCount(); i++) {
-            if (Number.class.isAssignableFrom(tableModel.getColumnClass(i))) {
+            Class<?> columnClass = tableModel.getColumnClass(i);
+            if (Number.class.isAssignableFrom(columnClass)
+                    || FragilityBarRenderer.Value.class.isAssignableFrom(columnClass)) {
                 sorter.setComparator(i, scoreComparator);
             }
         }
@@ -473,7 +486,19 @@ public final class ThresholdShootoutDialog {
         if ("Coverage %".equals(name)) return 90;
         if ("Range".equals(name)) return 140;
         if ("Status".equals(name)) return 220;
+        if ("Fragility".equals(name)) return 130;
         return 90;
+    }
+
+    private static double sortableScore(Object value) {
+        if (value instanceof Number) {
+            return ((Number) value).doubleValue();
+        }
+        if (value instanceof FragilityBarRenderer.Value) {
+            FragilityBarRenderer.Value fragility = (FragilityBarRenderer.Value) value;
+            return fragility.hasData() ? fragility.score : Double.NaN;
+        }
+        return Double.NaN;
     }
 
     private static boolean isScoreColumnName(String name) {
@@ -488,6 +513,7 @@ public final class ThresholdShootoutDialog {
         if ("f1".equals(name)) return F1_TOOLTIP;
         if ("Separation".equals(name)) return SEPARATION_TOOLTIP;
         if ("Distinctness".equals(name)) return DISTINCTNESS_TOOLTIP;
+        if ("Fragility".equals(name)) return FRAGILITY_TOOLTIP;
         return null;
     }
 
@@ -624,7 +650,11 @@ public final class ThresholdShootoutDialog {
     }
 
     private void setTableResults(List<ShootoutResult> rows, boolean showScores) {
-        tableModel.setResults(rows, showScores, showQualityColumns.isSelected());
+        tableModel.setResults(
+                rows,
+                showScores,
+                showQualityColumns.isSelected(),
+                runFragilityChecks.isSelected());
         configureTableColumns();
     }
 
@@ -649,7 +679,9 @@ public final class ThresholdShootoutDialog {
                 gridStepCount,
                 min,
                 max,
-                brightObjects.isSelected()).withGroundTruthReference(groundTruthReference);
+                brightObjects.isSelected())
+                .withGroundTruthReference(groundTruthReference)
+                .withRunFragilityChecks(runFragilityChecks.isSelected());
     }
 
     private ShootoutSettings.ThresholdMode selectedThresholdMode() {
@@ -1148,7 +1180,8 @@ public final class ThresholdShootoutDialog {
     private static String buildCsv(List<ShootoutResult> rows) {
         StringBuilder csv = new StringBuilder();
         csv.append("Variant,Count mode,Threshold value,Count,Mean size,Coverage %,Range,Status,")
-                .append("precision,recall,f1,separation,distinctness\n");
+                .append("precision,recall,f1,separation,distinctness,")
+                .append("fragility_score,fragility_range_min,fragility_range_max\n");
         for (ShootoutResult row : rows) {
             String[] values = new String[]{
                     row.variant,
@@ -1163,7 +1196,10 @@ public final class ThresholdShootoutDialog {
                     formatNumber(row.recall),
                     formatNumber(row.f1),
                     formatNumber(row.separationScore),
-                    formatNumber(row.distinctnessScore)
+                    formatNumber(row.distinctnessScore),
+                    formatNumber(row.fragilityScore),
+                    fragilityRangeMinimum(row),
+                    fragilityRangeMaximum(row)
             };
             for (int i = 0; i < values.length; i++) {
                 if (i > 0) csv.append(',');
@@ -1172,6 +1208,39 @@ public final class ThresholdShootoutDialog {
             csv.append('\n');
         }
         return csv.toString();
+    }
+
+    private static String fragilityRangeMinimum(ShootoutResult row) {
+        if (!hasFragilityRange(row)) {
+            return "";
+        }
+        int min = row.countSummary.count;
+        for (int count : row.fragilityCountRange) {
+            if (count < min) {
+                min = count;
+            }
+        }
+        return Integer.toString(min);
+    }
+
+    private static String fragilityRangeMaximum(ShootoutResult row) {
+        if (!hasFragilityRange(row)) {
+            return "";
+        }
+        int max = row.countSummary.count;
+        for (int count : row.fragilityCountRange) {
+            if (count > max) {
+                max = count;
+            }
+        }
+        return Integer.toString(max);
+    }
+
+    private static boolean hasFragilityRange(ShootoutResult row) {
+        return row != null
+                && row.countSummary != null
+                && row.fragilityCountRange != null
+                && isFinite(row.fragilityScore);
     }
 
     private ShootoutResult selectedResult() {
@@ -1200,6 +1269,16 @@ public final class ThresholdShootoutDialog {
         return false;
     }
 
+    private static FragilityBarRenderer.Value fragilityValue(ShootoutResult row) {
+        if (!hasFragilityRange(row)) {
+            return FragilityBarRenderer.Value.empty();
+        }
+        return FragilityBarRenderer.Value.of(
+                row.fragilityScore,
+                row.countSummary.count,
+                row.fragilityCountRange);
+    }
+
     private void updateControlState() {
         boolean busy = isBusy();
         ShootoutSettings.ThresholdMode mode = selectedThresholdMode();
@@ -1214,6 +1293,7 @@ public final class ThresholdShootoutDialog {
         maxSize.setEnabled(!busy);
         brightObjects.setEnabled(!busy && usesAuto(mode));
         showQualityColumns.setEnabled(!busy);
+        runFragilityChecks.setEnabled(!busy);
         loadReferenceButton.setEnabled(!busy);
         clearReferenceButton.setEnabled(!busy && groundTruthReference != null);
         accessiblePalette.setEnabled(!busy && groundTruthReference != null);
@@ -1426,19 +1506,25 @@ public final class ThresholdShootoutDialog {
         private static final String[] COLUMNS = new String[]{
                 "Variant", "Count mode", "Threshold value", "Count",
                 "Mean size", "Coverage %", "Range", "Status",
-                "precision", "recall", "f1", "Separation", "Distinctness"
+                "precision", "recall", "f1", "Separation", "Distinctness", "Fragility"
         };
 
         private List<ShootoutResult> rows = Collections.emptyList();
         private boolean showScores;
         private boolean showQualityScores;
+        private boolean showFragilityValues;
 
-        void setResults(List<ShootoutResult> rows, boolean showScores, boolean showQualityScores) {
+        void setResults(
+                List<ShootoutResult> rows,
+                boolean showScores,
+                boolean showQualityScores,
+                boolean showFragilityValues) {
             this.rows = rows == null ? Collections.<ShootoutResult>emptyList() : rows;
             boolean structureChanged = this.showScores != showScores
                     || this.showQualityScores != showQualityScores;
             this.showScores = showScores;
             this.showQualityScores = showQualityScores;
+            this.showFragilityValues = showFragilityValues;
             if (structureChanged) {
                 fireTableStructureChanged();
             } else {
@@ -1456,7 +1542,7 @@ public final class ThresholdShootoutDialog {
         }
 
         @Override public int getColumnCount() {
-            return 8 + (showScores ? 3 : 0) + (showQualityScores ? 2 : 0);
+            return 9 + (showScores ? 3 : 0) + (showQualityScores ? 2 : 0);
         }
 
         @Override public String getColumnName(int column) {
@@ -1464,7 +1550,11 @@ public final class ThresholdShootoutDialog {
         }
 
         @Override public Class<?> getColumnClass(int columnIndex) {
-            return modelColumn(columnIndex) >= 8 ? Double.class : String.class;
+            int modelColumn = modelColumn(columnIndex);
+            if (modelColumn == 13) {
+                return FragilityBarRenderer.Value.class;
+            }
+            return modelColumn >= 8 ? Double.class : String.class;
         }
 
         @Override public Object getValueAt(int rowIndex, int columnIndex) {
@@ -1484,6 +1574,7 @@ public final class ThresholdShootoutDialog {
                 case 10: return isFinite(row.f1) ? Double.valueOf(row.f1) : null;
                 case 11: return isFinite(row.separationScore) ? Double.valueOf(row.separationScore) : null;
                 case 12: return isFinite(row.distinctnessScore) ? Double.valueOf(row.distinctnessScore) : null;
+                case 13: return showFragilityValues ? fragilityValue(row) : FragilityBarRenderer.Value.empty();
                 default: return "";
             }
         }
@@ -1502,7 +1593,7 @@ public final class ThresholdShootoutDialog {
             if (showQualityScores && visibleColumn < offset + 2) {
                 return 11 + visibleColumn - offset;
             }
-            return visibleColumn;
+            return 13;
         }
     }
 

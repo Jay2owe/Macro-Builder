@@ -27,6 +27,8 @@ public final class ShootoutResult {
     public final int[] perObjectStatus;
     public final double separationScore;
     public final double distinctnessScore;
+    public final double fragilityScore;
+    public final int[] fragilityCountRange;
 
     private ShootoutResult(
             ShootoutSettings.CountingMode countingMode,
@@ -45,7 +47,9 @@ public final class ShootoutResult {
             double f1,
             int[] perObjectStatus,
             double separationScore,
-            double distinctnessScore) {
+            double distinctnessScore,
+            double fragilityScore,
+            int[] fragilityCountRange) {
         if (countingMode == null) {
             throw new IllegalArgumentException("countingMode must not be null");
         }
@@ -83,6 +87,8 @@ public final class ShootoutResult {
         this.perObjectStatus = perObjectStatus == null ? null : perObjectStatus.clone();
         this.separationScore = separationScore;
         this.distinctnessScore = distinctnessScore;
+        this.fragilityScore = fragilityScore;
+        this.fragilityCountRange = fragilityCountRange == null ? null : fragilityCountRange.clone();
     }
 
     public static ShootoutResult success(
@@ -118,7 +124,9 @@ public final class ShootoutResult {
                 Double.NaN,
                 null,
                 Double.NaN,
-                Double.NaN);
+                Double.NaN,
+                Double.NaN,
+                null);
     }
 
     public static ShootoutResult failure(
@@ -153,7 +161,9 @@ public final class ShootoutResult {
                 Double.NaN,
                 null,
                 Double.NaN,
-                Double.NaN);
+                Double.NaN,
+                Double.NaN,
+                null);
     }
 
     public boolean isSuccess() {
@@ -178,7 +188,9 @@ public final class ShootoutResult {
                 f1,
                 perObjectStatus,
                 separationScore,
-                distinctnessScore);
+                distinctnessScore,
+                fragilityScore,
+                fragilityCountRange);
     }
 
     public ShootoutResult withoutRecommendation() {
@@ -199,7 +211,9 @@ public final class ShootoutResult {
                 f1,
                 perObjectStatus,
                 separationScore,
-                distinctnessScore);
+                distinctnessScore,
+                fragilityScore,
+                fragilityCountRange);
     }
 
     public ShootoutResult withGroundTruthScore(GroundTruthScorer.ScoreSummary score) {
@@ -223,7 +237,9 @@ public final class ShootoutResult {
                 score.f1,
                 score.perObjectStatus,
                 separationScore,
-                distinctnessScore);
+                distinctnessScore,
+                fragilityScore,
+                fragilityCountRange);
     }
 
     public ShootoutResult withQualityScores(double separationScore, double distinctnessScore) {
@@ -244,6 +260,31 @@ public final class ShootoutResult {
                 f1,
                 perObjectStatus,
                 separationScore,
-                distinctnessScore);
+                distinctnessScore,
+                fragilityScore,
+                fragilityCountRange);
+    }
+
+    public ShootoutResult withFragility(double fragilityScore, int[] fragilityCountRange) {
+        return new ShootoutResult(
+                countingMode,
+                variant,
+                thresholdValue,
+                imageMinimum,
+                imageMaximum,
+                maskPreview,
+                countSummary,
+                status,
+                error,
+                recommended,
+                recommendationReason,
+                precision,
+                recall,
+                f1,
+                perObjectStatus,
+                separationScore,
+                distinctnessScore,
+                fragilityScore,
+                fragilityCountRange);
     }
 }

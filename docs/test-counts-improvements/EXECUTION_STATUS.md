@@ -24,3 +24,4 @@ On red: agent records FAILED here, orchestrator auto-spawns one corrective xhigh
 W0 - 01_foundation-perf-refactor: completed at 2026-05-16T17:56:20.9923958+01:00 (commit fa27594)
 W1 - 02_auto-threshold-grid: completed at 2026-05-16T18:07:59.8324223+01:00 (commit d25be1f)
 W2 - 04_batch-bioformats-and-channels: completed at 2026-05-16T18:20:58.0932460+01:00 (commit 38586ee)
+W3 - 03_histogram-and-curve-charts: completed at 2026-05-16T18:35:24.3748946+01:00 (commit 7af8af6)

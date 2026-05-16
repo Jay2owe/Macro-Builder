@@ -153,7 +153,7 @@ public final class ThresholdShootoutRunner {
                     context.rangeMax,
                     mask,
                     count);
-            return withGroundTruthScore(result, settings);
+            return withQualityScores(withGroundTruthScore(result, settings), context);
         } catch (RuntimeException ex) {
             return ShootoutResult.failure(
                     settings.countingMode,
@@ -181,7 +181,7 @@ public final class ThresholdShootoutRunner {
                     context.rangeMax,
                     mask,
                     count);
-            return withGroundTruthScore(result, settings);
+            return withQualityScores(withGroundTruthScore(result, settings), context);
         } catch (RuntimeException ex) {
             return ShootoutResult.failure(
                     settings.countingMode,
@@ -209,7 +209,7 @@ public final class ThresholdShootoutRunner {
                     context.rangeMax,
                     mask,
                     count);
-            return withGroundTruthScore(result, settings);
+            return withQualityScores(withGroundTruthScore(result, settings), context);
         } catch (RuntimeException ex) {
             return ShootoutResult.failure(
                     settings.countingMode,
@@ -266,6 +266,16 @@ public final class ThresholdShootoutRunner {
         GroundTruthScorer.ScoreSummary score =
                 GroundTruthScorer.score(result.maskPreview, settings.groundTruthReference, settings);
         return result.withGroundTruthScore(score);
+    }
+
+    private static ShootoutResult withQualityScores(ShootoutResult result, ShootoutContext context) {
+        if (result == null || context == null || !result.isSuccess() || result.thresholdValue == null) {
+            return result;
+        }
+        double threshold = result.thresholdValue.doubleValue();
+        return result.withQualityScores(
+                HistogramQualityScorer.separation(context.histogram, threshold, context),
+                HistogramQualityScorer.distinctness(context.histogram, threshold, context));
     }
 
     private static List<ShootoutResult> withRecommendedReferenceWinner(List<ShootoutResult> rows) {

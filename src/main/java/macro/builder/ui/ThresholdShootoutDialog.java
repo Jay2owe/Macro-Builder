@@ -85,6 +85,10 @@ public final class ThresholdShootoutDialog {
     private static final String MODE_AUTO_GRID = "Auto grid (recommended)";
     private static final String F1_TOOLTIP =
             "F1 uses greedy IoU matching from highest overlap down, with each reference and detection claimed once.";
+    private static final String SEPARATION_TOOLTIP =
+            "How cleanly this threshold splits the bright and dim parts of the image. 0 means total overlap; 1 means perfectly separated.";
+    private static final String DISTINCTNESS_TOOLTIP =
+            "How different the two groups look as distributions. 0 means identical; 1 means as distinct as possible.";
 
     private final ImagePlus source;
     private final String macro;
@@ -99,6 +103,7 @@ public final class ThresholdShootoutDialog {
     private final JButton clearReferenceButton = new JButton("Clear");
     private final JLabel referenceLabel = new JLabel("no reference");
     private final JCheckBox accessiblePalette = new JCheckBox("Colour-blind-safe preview colours");
+    private final JCheckBox showQualityColumns = new JCheckBox("Show quality columns");
     private final JSpinner gridSteps = new JSpinner(new SpinnerNumberModel(
             ShootoutSettings.DEFAULT_GRID_STEPS,
             ShootoutSettings.MIN_GRID_STEPS,
@@ -203,6 +208,7 @@ public final class ThresholdShootoutDialog {
         addHelpRow(settings, row++, ShootoutSettings.FIXED_THRESHOLD_HELP);
         addSizeRow(settings, row++);
         addCheckboxRow(settings, row++, brightObjects);
+        addCheckboxRow(settings, row++, showQualityColumns);
         addRangeRow(settings, row);
 
         thresholdMode.addActionListener(new ActionListener() {
@@ -213,6 +219,11 @@ public final class ThresholdShootoutDialog {
         gridSteps.addChangeListener(new ChangeListener() {
             @Override public void stateChanged(ChangeEvent e) {
                 updateControlState();
+            }
+        });
+        showQualityColumns.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                setTableResults(results, groundTruthReference != null);
             }
         });
 
@@ -407,17 +418,9 @@ public final class ThresholdShootoutDialog {
     }
 
     private static void configureColumns(TableColumnModel columns) {
-        setPreferredWidth(columns, 0, 150);
-        setPreferredWidth(columns, 1, 120);
-        setPreferredWidth(columns, 2, 110);
-        setPreferredWidth(columns, 3, 70);
-        setPreferredWidth(columns, 4, 90);
-        setPreferredWidth(columns, 5, 90);
-        setPreferredWidth(columns, 6, 140);
-        setPreferredWidth(columns, 7, 220);
-        setPreferredWidth(columns, 8, 75);
-        setPreferredWidth(columns, 9, 75);
-        setPreferredWidth(columns, 10, 75);
+        for (int i = 0; i < columns.getColumnCount(); i++) {
+            columns.getColumn(i).setPreferredWidth(preferredColumnWidth(columns.getColumn(i).getHeaderValue()));
+        }
     }
 
     private void configureTableColumns() {
@@ -425,15 +428,21 @@ public final class ThresholdShootoutDialog {
         if (table.getColumnModel().getColumnCount() > 0) {
             table.getColumnModel().getColumn(0).setCellRenderer(new RecommendedVariantRenderer(tableModel));
         }
-        if (tableModel.isShowingScores() && table.getColumnModel().getColumnCount() > 10) {
+        if (table.getColumnModel().getColumnCount() > 0) {
             ScoreRenderer scoreRenderer = new ScoreRenderer();
-            for (int i = 8; i <= 10; i++) {
-                table.getColumnModel().getColumn(i).setCellRenderer(scoreRenderer);
-            }
             JTableHeader header = table.getTableHeader();
             TableCellRenderer defaultRenderer = header.getDefaultRenderer();
-            table.getColumnModel().getColumn(10).setHeaderRenderer(
-                    new TooltipHeaderRenderer(defaultRenderer, F1_TOOLTIP));
+            for (int i = 0; i < table.getColumnModel().getColumnCount(); i++) {
+                String name = table.getColumnName(i);
+                if (isScoreColumnName(name)) {
+                    table.getColumnModel().getColumn(i).setCellRenderer(scoreRenderer);
+                }
+                String tooltip = tooltipForColumnName(name);
+                if (tooltip != null) {
+                    table.getColumnModel().getColumn(i).setHeaderRenderer(
+                            new TooltipHeaderRenderer(defaultRenderer, tooltip));
+                }
+            }
         }
         TableRowSorter<ResultTableModel> sorter = new TableRowSorter<ResultTableModel>(tableModel);
         Comparator<Object> scoreComparator = new Comparator<Object>() {
@@ -446,16 +455,40 @@ public final class ThresholdShootoutDialog {
                 return Double.compare(left, right);
             }
         };
-        for (int i = 8; i <= 10 && i < tableModel.getColumnCount(); i++) {
-            sorter.setComparator(i, scoreComparator);
+        for (int i = 0; i < tableModel.getColumnCount(); i++) {
+            if (Number.class.isAssignableFrom(tableModel.getColumnClass(i))) {
+                sorter.setComparator(i, scoreComparator);
+            }
         }
         table.setRowSorter(sorter);
     }
 
-    private static void setPreferredWidth(TableColumnModel columns, int index, int width) {
-        if (index < columns.getColumnCount()) {
-            columns.getColumn(index).setPreferredWidth(width);
-        }
+    private static int preferredColumnWidth(Object headerValue) {
+        String name = headerValue == null ? "" : headerValue.toString();
+        if ("Variant".equals(name)) return 150;
+        if ("Count mode".equals(name)) return 120;
+        if ("Threshold value".equals(name)) return 110;
+        if ("Count".equals(name)) return 70;
+        if ("Mean size".equals(name)) return 90;
+        if ("Coverage %".equals(name)) return 90;
+        if ("Range".equals(name)) return 140;
+        if ("Status".equals(name)) return 220;
+        return 90;
+    }
+
+    private static boolean isScoreColumnName(String name) {
+        return "precision".equals(name)
+                || "recall".equals(name)
+                || "f1".equals(name)
+                || "Separation".equals(name)
+                || "Distinctness".equals(name);
+    }
+
+    private static String tooltipForColumnName(String name) {
+        if ("f1".equals(name)) return F1_TOOLTIP;
+        if ("Separation".equals(name)) return SEPARATION_TOOLTIP;
+        if ("Distinctness".equals(name)) return DISTINCTNESS_TOOLTIP;
+        return null;
     }
 
     private void runShootout() {
@@ -591,7 +624,7 @@ public final class ThresholdShootoutDialog {
     }
 
     private void setTableResults(List<ShootoutResult> rows, boolean showScores) {
-        tableModel.setResults(rows, showScores);
+        tableModel.setResults(rows, showScores, showQualityColumns.isSelected());
         configureTableColumns();
     }
 
@@ -1114,7 +1147,8 @@ public final class ThresholdShootoutDialog {
 
     private static String buildCsv(List<ShootoutResult> rows) {
         StringBuilder csv = new StringBuilder();
-        csv.append("Variant,Count mode,Threshold value,Count,Mean size,Coverage %,Range,Status,precision,recall,f1\n");
+        csv.append("Variant,Count mode,Threshold value,Count,Mean size,Coverage %,Range,Status,")
+                .append("precision,recall,f1,separation,distinctness\n");
         for (ShootoutResult row : rows) {
             String[] values = new String[]{
                     row.variant,
@@ -1127,7 +1161,9 @@ public final class ThresholdShootoutDialog {
                     statusText(row),
                     formatNumber(row.precision),
                     formatNumber(row.recall),
-                    formatNumber(row.f1)
+                    formatNumber(row.f1),
+                    formatNumber(row.separationScore),
+                    formatNumber(row.distinctnessScore)
             };
             for (int i = 0; i < values.length; i++) {
                 if (i > 0) csv.append(',');
@@ -1177,6 +1213,7 @@ public final class ThresholdShootoutDialog {
         minSize.setEnabled(!busy);
         maxSize.setEnabled(!busy);
         brightObjects.setEnabled(!busy && usesAuto(mode));
+        showQualityColumns.setEnabled(!busy);
         loadReferenceButton.setEnabled(!busy);
         clearReferenceButton.setEnabled(!busy && groundTruthReference != null);
         accessiblePalette.setEnabled(!busy && groundTruthReference != null);
@@ -1389,25 +1426,24 @@ public final class ThresholdShootoutDialog {
         private static final String[] COLUMNS = new String[]{
                 "Variant", "Count mode", "Threshold value", "Count",
                 "Mean size", "Coverage %", "Range", "Status",
-                "precision", "recall", "f1"
+                "precision", "recall", "f1", "Separation", "Distinctness"
         };
 
         private List<ShootoutResult> rows = Collections.emptyList();
         private boolean showScores;
+        private boolean showQualityScores;
 
-        void setResults(List<ShootoutResult> rows, boolean showScores) {
+        void setResults(List<ShootoutResult> rows, boolean showScores, boolean showQualityScores) {
             this.rows = rows == null ? Collections.<ShootoutResult>emptyList() : rows;
-            boolean structureChanged = this.showScores != showScores;
+            boolean structureChanged = this.showScores != showScores
+                    || this.showQualityScores != showQualityScores;
             this.showScores = showScores;
+            this.showQualityScores = showQualityScores;
             if (structureChanged) {
                 fireTableStructureChanged();
             } else {
                 fireTableDataChanged();
             }
-        }
-
-        boolean isShowingScores() {
-            return showScores;
         }
 
         ShootoutResult resultAt(int row) {
@@ -1420,21 +1456,21 @@ public final class ThresholdShootoutDialog {
         }
 
         @Override public int getColumnCount() {
-            return showScores ? COLUMNS.length : 8;
+            return 8 + (showScores ? 3 : 0) + (showQualityScores ? 2 : 0);
         }
 
         @Override public String getColumnName(int column) {
-            return COLUMNS[column];
+            return COLUMNS[modelColumn(column)];
         }
 
         @Override public Class<?> getColumnClass(int columnIndex) {
-            return columnIndex >= 8 ? Double.class : String.class;
+            return modelColumn(columnIndex) >= 8 ? Double.class : String.class;
         }
 
         @Override public Object getValueAt(int rowIndex, int columnIndex) {
             ShootoutResult row = rows.get(rowIndex);
             ObjectCounter.CountSummary count = row.countSummary;
-            switch (columnIndex) {
+            switch (modelColumn(columnIndex)) {
                 case 0: return row.variant;
                 case 1: return countModeLabel(row.countingMode);
                 case 2: return row.thresholdValue == null ? "" : formatNumber(row.thresholdValue.doubleValue());
@@ -1446,8 +1482,27 @@ public final class ThresholdShootoutDialog {
                 case 8: return isFinite(row.precision) ? Double.valueOf(row.precision) : null;
                 case 9: return isFinite(row.recall) ? Double.valueOf(row.recall) : null;
                 case 10: return isFinite(row.f1) ? Double.valueOf(row.f1) : null;
+                case 11: return isFinite(row.separationScore) ? Double.valueOf(row.separationScore) : null;
+                case 12: return isFinite(row.distinctnessScore) ? Double.valueOf(row.distinctnessScore) : null;
                 default: return "";
             }
+        }
+
+        private int modelColumn(int visibleColumn) {
+            if (visibleColumn < 8) {
+                return visibleColumn;
+            }
+            int offset = 8;
+            if (showScores) {
+                if (visibleColumn < offset + 3) {
+                    return visibleColumn;
+                }
+                offset += 3;
+            }
+            if (showQualityScores && visibleColumn < offset + 2) {
+                return 11 + visibleColumn - offset;
+            }
+            return visibleColumn;
         }
     }
 

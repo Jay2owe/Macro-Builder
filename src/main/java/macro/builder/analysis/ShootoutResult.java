@@ -25,6 +25,8 @@ public final class ShootoutResult {
     public final double recall;
     public final double f1;
     public final int[] perObjectStatus;
+    public final double separationScore;
+    public final double distinctnessScore;
 
     private ShootoutResult(
             ShootoutSettings.CountingMode countingMode,
@@ -41,7 +43,9 @@ public final class ShootoutResult {
             double precision,
             double recall,
             double f1,
-            int[] perObjectStatus) {
+            int[] perObjectStatus,
+            double separationScore,
+            double distinctnessScore) {
         if (countingMode == null) {
             throw new IllegalArgumentException("countingMode must not be null");
         }
@@ -77,6 +81,8 @@ public final class ShootoutResult {
         this.recall = recall;
         this.f1 = f1;
         this.perObjectStatus = perObjectStatus == null ? null : perObjectStatus.clone();
+        this.separationScore = separationScore;
+        this.distinctnessScore = distinctnessScore;
     }
 
     public static ShootoutResult success(
@@ -110,7 +116,9 @@ public final class ShootoutResult {
                 Double.NaN,
                 Double.NaN,
                 Double.NaN,
-                null);
+                null,
+                Double.NaN,
+                Double.NaN);
     }
 
     public static ShootoutResult failure(
@@ -143,7 +151,9 @@ public final class ShootoutResult {
                 Double.NaN,
                 Double.NaN,
                 Double.NaN,
-                null);
+                null,
+                Double.NaN,
+                Double.NaN);
     }
 
     public boolean isSuccess() {
@@ -166,7 +176,9 @@ public final class ShootoutResult {
                 precision,
                 recall,
                 f1,
-                perObjectStatus);
+                perObjectStatus,
+                separationScore,
+                distinctnessScore);
     }
 
     public ShootoutResult withoutRecommendation() {
@@ -185,7 +197,9 @@ public final class ShootoutResult {
                 precision,
                 recall,
                 f1,
-                perObjectStatus);
+                perObjectStatus,
+                separationScore,
+                distinctnessScore);
     }
 
     public ShootoutResult withGroundTruthScore(GroundTruthScorer.ScoreSummary score) {
@@ -207,6 +221,29 @@ public final class ShootoutResult {
                 score.precision,
                 score.recall,
                 score.f1,
-                score.perObjectStatus);
+                score.perObjectStatus,
+                separationScore,
+                distinctnessScore);
+    }
+
+    public ShootoutResult withQualityScores(double separationScore, double distinctnessScore) {
+        return new ShootoutResult(
+                countingMode,
+                variant,
+                thresholdValue,
+                imageMinimum,
+                imageMaximum,
+                maskPreview,
+                countSummary,
+                status,
+                error,
+                recommended,
+                recommendationReason,
+                precision,
+                recall,
+                f1,
+                perObjectStatus,
+                separationScore,
+                distinctnessScore);
     }
 }

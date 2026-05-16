@@ -37,6 +37,7 @@ public final class ShootoutSettings {
     public final List<Integer> channelsToSweep;
     public final GroundTruthReference groundTruthReference;
     public final boolean runFragilityChecks;
+    public final List<int[]> clickPoints;
 
     public ShootoutSettings(
             CountingMode countingMode,
@@ -57,7 +58,8 @@ public final class ShootoutSettings {
                 darkBackground,
                 defaultChannelsToSweep(),
                 null,
-                true);
+                true,
+                Collections.<int[]>emptyList());
     }
 
     public ShootoutSettings(
@@ -80,7 +82,8 @@ public final class ShootoutSettings {
                 darkBackground,
                 defaultChannelsToSweep(),
                 null,
-                true);
+                true,
+                Collections.<int[]>emptyList());
     }
 
     public ShootoutSettings(
@@ -104,7 +107,8 @@ public final class ShootoutSettings {
                 darkBackground,
                 channelsToSweep,
                 null,
-                true);
+                true,
+                Collections.<int[]>emptyList());
     }
 
     public ShootoutSettings(
@@ -129,7 +133,8 @@ public final class ShootoutSettings {
                 darkBackground,
                 channelsToSweep,
                 groundTruthReference,
-                true);
+                true,
+                Collections.<int[]>emptyList());
     }
 
     public ShootoutSettings(
@@ -144,6 +149,34 @@ public final class ShootoutSettings {
             List<Integer> channelsToSweep,
             GroundTruthReference groundTruthReference,
             boolean runFragilityChecks) {
+        this(
+                countingMode,
+                thresholdMode,
+                autoMethods,
+                fixedThresholds,
+                gridSteps,
+                minSize,
+                maxSize,
+                darkBackground,
+                channelsToSweep,
+                groundTruthReference,
+                runFragilityChecks,
+                Collections.<int[]>emptyList());
+    }
+
+    public ShootoutSettings(
+            CountingMode countingMode,
+            ThresholdMode thresholdMode,
+            List<String> autoMethods,
+            List<Double> fixedThresholds,
+            int gridSteps,
+            double minSize,
+            double maxSize,
+            boolean darkBackground,
+            List<Integer> channelsToSweep,
+            GroundTruthReference groundTruthReference,
+            boolean runFragilityChecks,
+            List<int[]> clickPoints) {
         if (countingMode == null) {
             throw new IllegalArgumentException("countingMode must not be null");
         }
@@ -172,6 +205,7 @@ public final class ShootoutSettings {
         this.channelsToSweep = immutableChannelCopy(channelsToSweep);
         this.groundTruthReference = groundTruthReference;
         this.runFragilityChecks = runFragilityChecks;
+        this.clickPoints = immutablePointCopy(clickPoints);
     }
 
     public static ShootoutSettings defaults() {
@@ -186,7 +220,8 @@ public final class ShootoutSettings {
                 true,
                 defaultChannelsToSweep(),
                 null,
-                true);
+                true,
+                Collections.<int[]>emptyList());
     }
 
     public ShootoutSettings withChannelsToSweep(List<Integer> channels) {
@@ -201,7 +236,8 @@ public final class ShootoutSettings {
                 darkBackground,
                 channels,
                 groundTruthReference,
-                runFragilityChecks);
+                runFragilityChecks,
+                clickPoints);
     }
 
     public ShootoutSettings withGroundTruthReference(GroundTruthReference reference) {
@@ -216,7 +252,8 @@ public final class ShootoutSettings {
                 darkBackground,
                 channelsToSweep,
                 reference,
-                runFragilityChecks);
+                runFragilityChecks,
+                clickPoints);
     }
 
     public ShootoutSettings withRunFragilityChecks(boolean runFragilityChecks) {
@@ -231,7 +268,24 @@ public final class ShootoutSettings {
                 darkBackground,
                 channelsToSweep,
                 groundTruthReference,
-                runFragilityChecks);
+                runFragilityChecks,
+                clickPoints);
+    }
+
+    public ShootoutSettings withClickPoints(List<int[]> points) {
+        return new ShootoutSettings(
+                countingMode,
+                thresholdMode,
+                autoMethods,
+                fixedThresholds,
+                gridSteps,
+                minSize,
+                maxSize,
+                darkBackground,
+                channelsToSweep,
+                groundTruthReference,
+                runFragilityChecks,
+                points);
     }
 
     public ShootoutSettings withAdditionalFixed(double value) {
@@ -251,7 +305,8 @@ public final class ShootoutSettings {
                 darkBackground,
                 channelsToSweep,
                 groundTruthReference,
-                runFragilityChecks);
+                runFragilityChecks,
+                clickPoints);
     }
 
     public static List<Integer> defaultChannelsToSweep() {
@@ -341,6 +396,22 @@ public final class ShootoutSettings {
         }
         if (copy.isEmpty()) {
             return defaultChannelsToSweep();
+        }
+        return Collections.unmodifiableList(copy);
+    }
+
+    private static List<int[]> immutablePointCopy(List<int[]> values) {
+        if (values == null || values.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<int[]> copy = new ArrayList<int[]>(values.size());
+        for (int i = 0; i < values.size(); i++) {
+            int[] point = values.get(i);
+            if (point == null || point.length < 2) {
+                throw new IllegalArgumentException("clickPoints must contain [x, y, z] points");
+            }
+            int z = point.length > 2 ? point[2] : 1;
+            copy.add(new int[]{point[0], point[1], Math.max(1, z)});
         }
         return Collections.unmodifiableList(copy);
     }

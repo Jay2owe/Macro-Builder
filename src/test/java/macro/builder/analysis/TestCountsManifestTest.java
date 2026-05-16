@@ -5,6 +5,7 @@ import ij.process.ByteProcessor;
 import org.junit.Test;
 
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.Collections;
 
 import static org.junit.Assert.assertEquals;
@@ -62,6 +63,35 @@ public class TestCountsManifestTest {
         String escaped = TestCountsManifest.jsonEscape(tricky);
 
         assertEquals(tricky, unescapeJsonString("\"" + escaped + "\""));
+    }
+
+    @Test
+    public void recordsClickFitBlockWhenClickPointsArePresent() {
+        ShootoutSettings settings = ShootoutSettings.defaults().withClickPoints(Arrays.asList(
+                new int[]{3, 4, 1},
+                new int[]{5, 6, 2}));
+        ShootoutResult row = ShootoutResult.success(
+                ShootoutResult.Source.CLICK_FIT,
+                ShootoutSettings.CountingMode.PARTICLES_2D,
+                "Click-fit",
+                Double.valueOf(12.5),
+                0.0,
+                255.0,
+                null,
+                new ObjectCounter.CountSummary(12, 3.5, 42.0, 0.25))
+                .withRecommendation("catches 2 of 2 clicked objects with a plausible count of 12.");
+
+        String json = TestCountsManifest.builder()
+                .settings(settings)
+                .results(Collections.singletonList(row))
+                .chosenVariant(row)
+                .build()
+                .toJson();
+
+        assertTrue(json.contains("\"clickFit\":{\"points\":[[3,4,1],[5,6,2]],"
+                + "\"thresholdValue\":12.5,\"variant\":\"Click-fit\"}"));
+        assertTrue(json.contains("\"clickPoints\":[[3,4,1],[5,6,2]]"));
+        assertTrue(json.contains("\"source\":\"CLICK_FIT\""));
     }
 
     private static ShootoutResult scoredResult(ShootoutSettings settings) {

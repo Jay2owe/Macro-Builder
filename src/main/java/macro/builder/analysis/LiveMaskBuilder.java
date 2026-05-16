@@ -1,11 +1,19 @@
 package macro.builder.analysis;
 
+import ij.ImagePlus;
 import ij.process.ByteProcessor;
 import ij.process.ImageProcessor;
 
 public final class LiveMaskBuilder {
 
     private LiveMaskBuilder() {
+    }
+
+    public static ImagePlus build(ImagePlus source, double lower, double upper) {
+        if (source == null) {
+            throw new IllegalArgumentException("source must not be null");
+        }
+        return ThresholdShootoutRunner.createMask(source, "Live mask", lower, upper);
     }
 
     public static void rebuildInPlace(ByteProcessor mask, ImageProcessor src, double lower, double upper) {

@@ -12,7 +12,8 @@ public final class ShootoutResult {
     public enum Source {
         AUTO,
         FIXED,
-        GRID
+        GRID,
+        CLICK_FIT
     }
 
     public final ShootoutSettings.CountingMode countingMode;

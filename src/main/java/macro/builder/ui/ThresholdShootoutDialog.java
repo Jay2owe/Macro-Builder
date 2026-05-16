@@ -8,6 +8,7 @@ import ij.io.FileInfo;
 import ij.plugin.Duplicator;
 import ij.plugin.frame.RoiManager;
 import macro.builder.Macro_Builder;
+import macro.builder.analysis.BackSolver;
 import macro.builder.analysis.BatchShootoutResult;
 import macro.builder.analysis.BatchShootoutRunner;
 import macro.builder.analysis.ConsensusMaskBuilder;
@@ -84,6 +85,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.ExecutionException;
+import java.util.function.Consumer;
 
 public final class ThresholdShootoutDialog {
 
@@ -141,6 +143,7 @@ public final class ThresholdShootoutDialog {
     private final JTable table = new JTable(tableModel);
     private final JButton runButton = new JButton("Run");
     private final JButton previewButton = new JButton("Open mask preview");
+    private final JButton clickFitButton = new JButton("Click good objects...");
     private final JButton scrubButton = new JButton("Scrub...");
     private final JButton applyToMacroButton = new JButton("Apply to macro");
     private final JButton copyMethodsButton = new JButton("Copy methods paragraph");
@@ -156,10 +159,12 @@ public final class ThresholdShootoutDialog {
     private ShootoutRun activeShootoutRun;
     private ShootoutSettings activeSettings;
     private ImagePlus activeMaskPreview;
+    private ClickCapture clickCapture;
     private ScrubPane scrubPane;
     private ImagePlus activeConsensusMask;
     private ImagePlus activeConsensusPreview;
     private SwingWorker<ShootoutUiResult, Void> worker;
+    private SwingWorker<ShootoutResult, Void> clickFitWorker;
     private SwingWorker<ShootoutResult, Void> pinWorker;
     private SwingWorker<BatchRunResult, Void> batchWorker;
     private SwingWorker<GroundTruthReference, Void> referenceWorker;
@@ -324,6 +329,7 @@ public final class ThresholdShootoutDialog {
         JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
         left.add(previewButton);
         if (!GraphicsEnvironment.isHeadless()) {
+            left.add(clickFitButton);
             left.add(scrubButton);
         }
         left.add(applyToMacroButton);
@@ -345,6 +351,11 @@ public final class ThresholdShootoutDialog {
         previewButton.addActionListener(new ActionListener() {
             @Override public void actionPerformed(ActionEvent e) {
                 openMaskPreview();
+            }
+        });
+        clickFitButton.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                startClickCapture();
             }
         });
         scrubButton.addActionListener(new ActionListener() {
@@ -411,6 +422,10 @@ public final class ThresholdShootoutDialog {
                 if (pinWorker != null && !pinWorker.isDone()) {
                     pinWorker.cancel(true);
                 }
+                if (clickFitWorker != null && !clickFitWorker.isDone()) {
+                    clickFitWorker.cancel(true);
+                }
+                cancelClickCapture();
                 closeScrubPane();
                 closeImageQuietly(activeMaskPreview);
                 activeMaskPreview = null;
@@ -993,6 +1008,129 @@ public final class ThresholdShootoutDialog {
         activeMaskPreview = preview;
     }
 
+    private void startClickCapture() {
+        if (GraphicsEnvironment.isHeadless()) {
+            return;
+        }
+        if (isBusy()) {
+            return;
+        }
+        if (!canRunClickFit()) {
+            IJ.showMessage("Test Counts", "Run Test Counts successfully before click-fitting a threshold.");
+            return;
+        }
+        if (clickCapture != null && clickCapture.isActive()) {
+            clickCapture.toFront();
+            return;
+        }
+        try {
+            clickCapture = ClickCapture.start(
+                    dialog,
+                    source,
+                    new Consumer<List<int[]>>() {
+                        @Override public void accept(List<int[]> points) {
+                            clickCapture = null;
+                            runClickFit(points);
+                        }
+                    },
+                    new Runnable() {
+                        @Override public void run() {
+                            clickCapture = null;
+                            if (!closed && dialog.isDisplayable()) {
+                                statusLabel.setText("Click-fit cancelled.");
+                                updateControlState();
+                            }
+                        }
+                    });
+            statusLabel.setText("Click 5-10 real objects in the source image.");
+            updateControlState();
+        } catch (RuntimeException ex) {
+            clickCapture = null;
+            IJ.showMessage("Test Counts", "Could not start click capture:\n" + cleanMessage(ex));
+            updateControlState();
+        }
+    }
+
+    private void runClickFit(List<int[]> points) {
+        if (closed || !dialog.isDisplayable()) {
+            return;
+        }
+        if (points == null || points.isEmpty()) {
+            IJ.showMessage("Test Counts", "Click at least one object before pressing Done.");
+            updateControlState();
+            return;
+        }
+        if (!canRunClickFit()) {
+            IJ.showMessage("Test Counts", "The retained macro output is no longer available.");
+            updateControlState();
+            return;
+        }
+        final List<int[]> captured = pointCopy(points);
+        final ShootoutContext context = activeShootoutRun.context;
+        final ShootoutSettings clickSettings = activeSettings.withClickPoints(captured);
+        activeSettings = clickSettings;
+        notifySettings(clickSettings);
+        statusLabel.setText("Finding the threshold that catches your clicked objects...");
+        setProgressIndeterminate("Click-fitting threshold...");
+
+        clickFitWorker = new SwingWorker<ShootoutResult, Void>() {
+            @Override protected ShootoutResult doInBackground() {
+                BackSolver.BackSolverResult solved = BackSolver.solve(
+                        context,
+                        captured,
+                        clickSettings,
+                        BackSolver.DEFAULT_GRID_STEPS);
+                return BackSolver.toShootoutResult(solved, context, clickSettings);
+            }
+
+            @Override protected void done() {
+                onClickFitDone(this);
+            }
+        };
+        updateControlState();
+        clickFitWorker.execute();
+    }
+
+    private void onClickFitDone(SwingWorker<ShootoutResult, Void> finishedWorker) {
+        ShootoutResult row = null;
+        String failure = null;
+        try {
+            row = finishedWorker.get();
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            failure = "Click-fit interrupted.";
+        } catch (ExecutionException ex) {
+            failure = "Click-fit failed: " + cleanMessage(ex.getCause());
+        }
+
+        if (finishedWorker == clickFitWorker) {
+            clickFitWorker = null;
+        }
+        if (closed || !dialog.isDisplayable()) {
+            closeImageQuietly(row == null ? null : row.maskPreview);
+            return;
+        }
+
+        if (failure != null) {
+            statusLabel.setText(failure);
+            setProgressValue(0, "Click-fit failed.");
+            updateControlState();
+            return;
+        }
+
+        List<ShootoutResult> updated = withoutRecommendations(results);
+        updated.add(row);
+        results = updated;
+        setTableResults(results, activeSettings != null && activeSettings.groundTruthReference != null);
+        selectModelRow(results.size() - 1);
+        statusLabel.setText(row.recommendationReason);
+        setProgressValue(100, "Click-fit complete.");
+        if (sidecarFile != null) {
+            writeSidecarAsync(null, row, macro);
+        }
+        updateControlState();
+    }
+
     private void openScrubPane() {
         if (!canOpenScrubPane()) {
             IJ.showMessage("Test Counts", "Run Test Counts successfully before scrubbing thresholds.");
@@ -1371,6 +1509,24 @@ public final class ThresholdShootoutDialog {
                 && hasSuccessfulRows(results);
     }
 
+    private boolean canRunClickFit() {
+        return activeShootoutRun != null
+                && activeShootoutRun.context != null
+                && activeShootoutRun.context.processed != null
+                && activeSettings != null
+                && isFinite(activeShootoutRun.context.rangeMin)
+                && isFinite(activeShootoutRun.context.rangeMax)
+                && activeShootoutRun.context.rangeMax >= activeShootoutRun.context.rangeMin;
+    }
+
+    private void cancelClickCapture() {
+        ClickCapture capture = clickCapture;
+        clickCapture = null;
+        if (capture != null && capture.isActive()) {
+            capture.cancel();
+        }
+    }
+
     private int activeSliceForScrub() {
         int slice = source == null ? 1 : source.getSlice();
         int maxSlice = activeShootoutRun == null || activeShootoutRun.context == null
@@ -1405,6 +1561,36 @@ public final class ThresholdShootoutDialog {
         if (viewRow >= 0) {
             table.setRowSelectionInterval(viewRow, viewRow);
         }
+    }
+
+    private static List<ShootoutResult> withoutRecommendations(List<ShootoutResult> rows) {
+        if (rows == null || rows.isEmpty()) {
+            return new ArrayList<ShootoutResult>();
+        }
+        List<ShootoutResult> updated = new ArrayList<ShootoutResult>(rows.size());
+        for (ShootoutResult row : rows) {
+            if (row != null && row.recommended) {
+                updated.add(row.withoutRecommendation());
+            } else {
+                updated.add(row);
+            }
+        }
+        return updated;
+    }
+
+    private static List<int[]> pointCopy(List<int[]> points) {
+        if (points == null || points.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<int[]> copy = new ArrayList<int[]>(points.size());
+        for (int i = 0; i < points.size(); i++) {
+            int[] point = points.get(i);
+            if (point != null && point.length >= 2) {
+                int z = point.length > 2 ? point[2] : 1;
+                copy.add(new int[]{point[0], point[1], Math.max(1, z)});
+            }
+        }
+        return Collections.unmodifiableList(copy);
     }
 
     private File sourceImageFile(ImagePlus image) {
@@ -1856,6 +2042,10 @@ public final class ThresholdShootoutDialog {
                 && row.variant.startsWith("Pinned ");
     }
 
+    private static boolean isClickFitResult(ShootoutResult row) {
+        return row != null && row.source == ShootoutResult.Source.CLICK_FIT;
+    }
+
     private void updateControlState() {
         boolean busy = isBusy();
         ShootoutSettings.ThresholdMode mode = selectedThresholdMode();
@@ -1885,6 +2075,7 @@ public final class ThresholdShootoutDialog {
 
         ShootoutResult selected = selectedResult();
         previewButton.setEnabled(!busy && selected != null && selected.isSuccess() && selected.maskPreview != null);
+        clickFitButton.setEnabled(!busy && !GraphicsEnvironment.isHeadless() && canRunClickFit());
         scrubButton.setEnabled(!busy && canOpenScrubPane());
         applyToMacroButton.setEnabled(!busy && selected != null && selected.isSuccess());
         copyMethodsButton.setEnabled(!busy && selectedOrRecommendedResult() != null);
@@ -1901,11 +2092,24 @@ public final class ThresholdShootoutDialog {
     }
 
     private boolean isBusy() {
-        return isShootoutBusy() || isPinBusy() || isBatchBusy() || isReferenceBusy();
+        return isShootoutBusy()
+                || isClickFitBusy()
+                || isClickCaptureActive()
+                || isPinBusy()
+                || isBatchBusy()
+                || isReferenceBusy();
     }
 
     private boolean isShootoutBusy() {
         return worker != null && !worker.isDone();
+    }
+
+    private boolean isClickFitBusy() {
+        return clickFitWorker != null && !clickFitWorker.isDone();
+    }
+
+    private boolean isClickCaptureActive() {
+        return clickCapture != null && clickCapture.isActive();
     }
 
     private boolean isPinBusy() {
@@ -2296,7 +2500,12 @@ public final class ThresholdShootoutDialog {
                 int modelRow = table.convertRowIndexToModel(row);
                 ShootoutResult result = model.resultAt(modelRow);
                 String text = value == null ? "" : value.toString();
-                if (isPinnedResult(result)) {
+                if (isClickFitResult(result)) {
+                    String prefix = result.recommended ? "&#9733; " : "";
+                    label.setText("<html>" + prefix + escapeHtml(text)
+                            + " <span style='font-size:9px;color:#555;'>CLICK_FIT</span></html>");
+                    label.setToolTipText(result.recommended ? result.recommendationReason : "Click-fit threshold");
+                } else if (isPinnedResult(result)) {
                     String prefix = result.recommended ? "&#9733; " : "";
                     label.setText("<html>" + prefix + escapeHtml(text)
                             + " <span style='font-size:9px;color:#555;'>pinned</span></html>");

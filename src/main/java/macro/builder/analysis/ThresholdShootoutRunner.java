@@ -131,6 +131,9 @@ public final class ThresholdShootoutRunner {
             rows.addAll(withRecommendedPlateau(gridRows));
         }
 
+        if (settings.groundTruthReference != null) {
+            return withRecommendedReferenceWinner(rows);
+        }
         return rows;
     }
 
@@ -142,7 +145,7 @@ public final class ThresholdShootoutRunner {
             ThresholdWindow window = autoThresholdWindow(context, settings.darkBackground, method);
             ImagePlus mask = createMask(context.processed, method + " mask", window.lower, window.upper);
             ObjectCounter.CountSummary count = ObjectCounter.count(mask, settings);
-            return ShootoutResult.success(
+            ShootoutResult result = ShootoutResult.success(
                     settings.countingMode,
                     method,
                     Double.valueOf(window.displayValue),
@@ -150,6 +153,7 @@ public final class ThresholdShootoutRunner {
                     context.rangeMax,
                     mask,
                     count);
+            return withGroundTruthScore(result, settings);
         } catch (RuntimeException ex) {
             return ShootoutResult.failure(
                     settings.countingMode,
@@ -169,7 +173,7 @@ public final class ThresholdShootoutRunner {
         try {
             ImagePlus mask = createMask(context.processed, label + " mask", value, context.rangeMax);
             ObjectCounter.CountSummary count = ObjectCounter.count(mask, settings);
-            return ShootoutResult.success(
+            ShootoutResult result = ShootoutResult.success(
                     settings.countingMode,
                     label,
                     Double.valueOf(value),
@@ -177,6 +181,7 @@ public final class ThresholdShootoutRunner {
                     context.rangeMax,
                     mask,
                     count);
+            return withGroundTruthScore(result, settings);
         } catch (RuntimeException ex) {
             return ShootoutResult.failure(
                     settings.countingMode,
@@ -196,7 +201,7 @@ public final class ThresholdShootoutRunner {
         try {
             ImagePlus mask = createMask(context.processed, label + " mask", value, context.rangeMax);
             ObjectCounter.CountSummary count = ObjectCounter.count(mask, settings);
-            return ShootoutResult.success(
+            ShootoutResult result = ShootoutResult.success(
                     settings.countingMode,
                     label,
                     Double.valueOf(value),
@@ -204,6 +209,7 @@ public final class ThresholdShootoutRunner {
                     context.rangeMax,
                     mask,
                     count);
+            return withGroundTruthScore(result, settings);
         } catch (RuntimeException ex) {
             return ShootoutResult.failure(
                     settings.countingMode,
@@ -250,6 +256,54 @@ public final class ThresholdShootoutRunner {
         List<ShootoutResult> updated = new ArrayList<ShootoutResult>(gridRows);
         int rowIndex = rowIndexes.get(plateauIndex).intValue();
         updated.set(rowIndex, updated.get(rowIndex).withRecommendation(PlateauFinder.DEFAULT_REASON));
+        return updated;
+    }
+
+    private static ShootoutResult withGroundTruthScore(ShootoutResult result, ShootoutSettings settings) {
+        if (result == null || settings == null || settings.groundTruthReference == null || !result.isSuccess()) {
+            return result;
+        }
+        GroundTruthScorer.ScoreSummary score =
+                GroundTruthScorer.score(result.maskPreview, settings.groundTruthReference, settings);
+        return result.withGroundTruthScore(score);
+    }
+
+    private static List<ShootoutResult> withRecommendedReferenceWinner(List<ShootoutResult> rows) {
+        if (rows == null || rows.isEmpty()) {
+            return Collections.emptyList();
+        }
+        int bestIndex = -1;
+        double bestF1 = Double.NEGATIVE_INFINITY;
+        double bestRecall = Double.NEGATIVE_INFINITY;
+        double bestPrecision = Double.NEGATIVE_INFINITY;
+        for (int i = 0; i < rows.size(); i++) {
+            ShootoutResult row = rows.get(i);
+            if (row == null || !row.isSuccess() || !isFinite(row.f1)) {
+                continue;
+            }
+            if (row.f1 > bestF1
+                    || (row.f1 == bestF1 && row.recall > bestRecall)
+                    || (row.f1 == bestF1 && row.recall == bestRecall && row.precision > bestPrecision)) {
+                bestIndex = i;
+                bestF1 = row.f1;
+                bestRecall = row.recall;
+                bestPrecision = row.precision;
+            }
+        }
+        if (bestIndex < 0) {
+            return rows;
+        }
+        List<ShootoutResult> updated = new ArrayList<ShootoutResult>(rows.size());
+        for (int i = 0; i < rows.size(); i++) {
+            ShootoutResult row = rows.get(i);
+            if (row == null) {
+                updated.add(null);
+            } else if (i == bestIndex) {
+                updated.add(row.withRecommendation("highest agreement with your reference"));
+            } else {
+                updated.add(row.withoutRecommendation());
+            }
+        }
         return updated;
     }
 

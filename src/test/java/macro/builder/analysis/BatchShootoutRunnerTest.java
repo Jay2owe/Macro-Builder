@@ -61,7 +61,7 @@ public class BatchShootoutRunnerTest {
         String csv = BatchShootoutRunner.buildCsv(rows);
         assertTrue(csv.startsWith("file,title,width,height,channels,slices,frames,counting_mode,variant,"
                 + "threshold_value,count,mean_size,coverage,range_min,range_max,status,error,"
-                + "series_index,channel_index\n"));
+                + "series_index,channel_index,precision,recall,f1\n"));
         assertTrue(csv.contains(first.getAbsolutePath()));
     }
 

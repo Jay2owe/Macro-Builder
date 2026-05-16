@@ -3,9 +3,13 @@ package macro.builder.ui;
 import ij.IJ;
 import ij.ImagePlus;
 import ij.WindowManager;
+import ij.gui.Roi;
 import ij.plugin.Duplicator;
+import ij.plugin.frame.RoiManager;
 import macro.builder.analysis.BatchShootoutResult;
 import macro.builder.analysis.BatchShootoutRunner;
+import macro.builder.analysis.GroundTruthLoader;
+import macro.builder.analysis.GroundTruthReference;
 import macro.builder.analysis.ObjectCounter;
 import macro.builder.analysis.ShootoutRun;
 import macro.builder.analysis.ShootoutResult;
@@ -39,7 +43,10 @@ import javax.swing.event.ListSelectionListener;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import javax.swing.table.AbstractTableModel;
 import javax.swing.table.DefaultTableCellRenderer;
+import javax.swing.table.JTableHeader;
+import javax.swing.table.TableCellRenderer;
 import javax.swing.table.TableColumnModel;
+import javax.swing.table.TableRowSorter;
 import java.awt.BorderLayout;
 import java.awt.Component;
 import java.awt.Dialog;
@@ -63,6 +70,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.ExecutionException;
@@ -75,6 +83,8 @@ public final class ThresholdShootoutDialog {
     private static final String MODE_FIXED = "Fixed numeric threshold";
     private static final String MODE_AUTO_AND_FIXED = "Auto methods + fixed thresholds";
     private static final String MODE_AUTO_GRID = "Auto grid (recommended)";
+    private static final String F1_TOOLTIP =
+            "F1 uses greedy IoU matching from highest overlap down, with each reference and detection claimed once.";
 
     private final ImagePlus source;
     private final String macro;
@@ -85,6 +95,10 @@ public final class ThresholdShootoutDialog {
     private final JComboBox<String> countingMode = new JComboBox<String>(new String[]{COUNT_2D, COUNT_3D});
     private final JComboBox<String> thresholdMode = new JComboBox<String>(
             new String[]{MODE_AUTO_GRID, MODE_AUTO, MODE_FIXED, MODE_AUTO_AND_FIXED});
+    private final JButton loadReferenceButton = new JButton("Load reference...");
+    private final JButton clearReferenceButton = new JButton("Clear");
+    private final JLabel referenceLabel = new JLabel("no reference");
+    private final JCheckBox accessiblePalette = new JCheckBox("Colour-blind-safe preview colours");
     private final JSpinner gridSteps = new JSpinner(new SpinnerNumberModel(
             ShootoutSettings.DEFAULT_GRID_STEPS,
             ShootoutSettings.MIN_GRID_STEPS,
@@ -110,10 +124,13 @@ public final class ThresholdShootoutDialog {
     private final JButton cancelBatchButton = new JButton("Cancel batch");
 
     private List<ShootoutResult> results = Collections.emptyList();
+    private GroundTruthReference groundTruthReference;
     private ShootoutRun activeShootoutRun;
+    private ShootoutSettings activeSettings;
     private ImagePlus activeMaskPreview;
     private SwingWorker<ShootoutUiResult, Void> worker;
     private SwingWorker<BatchRunResult, Void> batchWorker;
+    private SwingWorker<GroundTruthReference, Void> referenceWorker;
     private volatile boolean batchCancelRequested;
     private boolean closed;
 
@@ -164,13 +181,18 @@ public final class ThresholdShootoutDialog {
         dialog.setSize(Math.max(860, preferred.width), Math.max(560, preferred.height));
         dialog.setLocationRelativeTo(dialog.getOwner());
         dialog.setVisible(true);
+        offerRoiManagerReference();
         updateControlState();
     }
 
     private void buildUi() {
+        JPanel north = new JPanel(new BorderLayout(0, 6));
+        north.setBorder(BorderFactory.createEmptyBorder(10, 12, 0, 12));
+        north.add(buildReferencePanel(), BorderLayout.NORTH);
+
         JPanel settings = new JPanel(new GridBagLayout());
         settings.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createEmptyBorder(10, 12, 0, 12),
+                BorderFactory.createEmptyBorder(0, 0, 0, 0),
                 BorderFactory.createTitledBorder("Settings")));
 
         int row = 0;
@@ -194,17 +216,16 @@ public final class ThresholdShootoutDialog {
             }
         });
 
-        dialog.add(settings, BorderLayout.NORTH);
+        north.add(settings, BorderLayout.CENTER);
+        dialog.add(north, BorderLayout.NORTH);
 
         table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-        table.setAutoCreateRowSorter(true);
         table.getSelectionModel().addListSelectionListener(new ListSelectionListener() {
             @Override public void valueChanged(ListSelectionEvent e) {
                 if (!e.getValueIsAdjusting()) updateControlState();
             }
         });
-        configureColumns(table.getColumnModel());
-        table.getColumnModel().getColumn(0).setCellRenderer(new RecommendedVariantRenderer(tableModel));
+        configureTableColumns();
         JScrollPane scroll = new JScrollPane(table);
         scroll.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createEmptyBorder(0, 12, 0, 12),
@@ -285,8 +306,32 @@ public final class ThresholdShootoutDialog {
                 closeResultImages(results);
                 closeShootoutRun(activeShootoutRun);
                 activeShootoutRun = null;
+                activeSettings = null;
             }
         });
+    }
+
+    private JPanel buildReferencePanel() {
+        JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 2));
+        panel.setBorder(BorderFactory.createTitledBorder("Reference"));
+        loadReferenceButton.setToolTipText("Accepted formats: RoiSet.zip, Cell Counter XML, x,y CSV, label-image TIFF.");
+        loadReferenceButton.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                loadReferenceFromFile();
+            }
+        });
+        clearReferenceButton.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                setGroundTruthReference(null);
+                statusLabel.setText("Reference cleared.");
+            }
+        });
+        accessiblePalette.setOpaque(false);
+        panel.add(loadReferenceButton);
+        panel.add(referenceLabel);
+        panel.add(clearReferenceButton);
+        panel.add(accessiblePalette);
+        return panel;
     }
 
     private static void addSettingRow(JPanel panel, int row, String label, java.awt.Component component) {
@@ -370,6 +415,41 @@ public final class ThresholdShootoutDialog {
         setPreferredWidth(columns, 5, 90);
         setPreferredWidth(columns, 6, 140);
         setPreferredWidth(columns, 7, 220);
+        setPreferredWidth(columns, 8, 75);
+        setPreferredWidth(columns, 9, 75);
+        setPreferredWidth(columns, 10, 75);
+    }
+
+    private void configureTableColumns() {
+        configureColumns(table.getColumnModel());
+        if (table.getColumnModel().getColumnCount() > 0) {
+            table.getColumnModel().getColumn(0).setCellRenderer(new RecommendedVariantRenderer(tableModel));
+        }
+        if (tableModel.isShowingScores() && table.getColumnModel().getColumnCount() > 10) {
+            ScoreRenderer scoreRenderer = new ScoreRenderer();
+            for (int i = 8; i <= 10; i++) {
+                table.getColumnModel().getColumn(i).setCellRenderer(scoreRenderer);
+            }
+            JTableHeader header = table.getTableHeader();
+            TableCellRenderer defaultRenderer = header.getDefaultRenderer();
+            table.getColumnModel().getColumn(10).setHeaderRenderer(
+                    new TooltipHeaderRenderer(defaultRenderer, F1_TOOLTIP));
+        }
+        TableRowSorter<ResultTableModel> sorter = new TableRowSorter<ResultTableModel>(tableModel);
+        Comparator<Object> scoreComparator = new Comparator<Object>() {
+            @Override public int compare(Object a, Object b) {
+                double left = a instanceof Number ? ((Number) a).doubleValue() : Double.NaN;
+                double right = b instanceof Number ? ((Number) b).doubleValue() : Double.NaN;
+                if (Double.isNaN(left) && Double.isNaN(right)) return 0;
+                if (Double.isNaN(left)) return 1;
+                if (Double.isNaN(right)) return -1;
+                return Double.compare(left, right);
+            }
+        };
+        for (int i = 8; i <= 10 && i < tableModel.getColumnCount(); i++) {
+            sorter.setComparator(i, scoreComparator);
+        }
+        table.setRowSorter(sorter);
     }
 
     private static void setPreferredWidth(TableColumnModel columns, int index, int width) {
@@ -393,6 +473,7 @@ public final class ThresholdShootoutDialog {
             return;
         }
         notifySettings(settings);
+        activeSettings = settings;
 
         closeImageQuietly(activeMaskPreview);
         activeMaskPreview = null;
@@ -400,7 +481,7 @@ public final class ThresholdShootoutDialog {
         closeShootoutRun(activeShootoutRun);
         activeShootoutRun = null;
         results = Collections.emptyList();
-        tableModel.setResults(results);
+        setTableResults(results, settings.groundTruthReference != null);
         chartPanel.hideForRun();
         rangeLabel.setText("Macro output range: running...");
         statusLabel.setText("Running count shootout...");
@@ -463,7 +544,7 @@ public final class ThresholdShootoutDialog {
             activeShootoutRun = result.run;
         }
         results = rows == null ? Collections.<ShootoutResult>emptyList() : rows;
-        tableModel.setResults(results);
+        setTableResults(results, activeSettings != null && activeSettings.groundTruthReference != null);
         updateRangeLabel(results);
         if (!results.isEmpty()) {
             table.setRowSelectionInterval(0, 0);
@@ -509,6 +590,11 @@ public final class ThresholdShootoutDialog {
         });
     }
 
+    private void setTableResults(List<ShootoutResult> rows, boolean showScores) {
+        tableModel.setResults(rows, showScores);
+        configureTableColumns();
+    }
+
     private ShootoutSettings buildSettings() {
         ShootoutSettings.CountingMode countMode = COUNT_3D.equals(countingMode.getSelectedItem())
                 ? ShootoutSettings.CountingMode.OBJECTS_3D
@@ -530,7 +616,7 @@ public final class ThresholdShootoutDialog {
                 gridStepCount,
                 min,
                 max,
-                brightObjects.isSelected());
+                brightObjects.isSelected()).withGroundTruthReference(groundTruthReference);
     }
 
     private ShootoutSettings.ThresholdMode selectedThresholdMode() {
@@ -598,6 +684,85 @@ public final class ThresholdShootoutDialog {
         rangeLabel.setText("Macro output range: unavailable.");
     }
 
+    private void loadReferenceFromFile() {
+        if (isBusy()) return;
+        JFileChooser chooser = new JFileChooser();
+        chooser.setDialogTitle("Load Reference");
+        chooser.addChoosableFileFilter(new FileNameExtensionFilter(
+                "Reference files (*.zip, *.xml, *.csv, *.tif, *.tiff)",
+                "zip", "xml", "csv", "tif", "tiff"));
+        if (chooser.showOpenDialog(dialog) != JFileChooser.APPROVE_OPTION) {
+            return;
+        }
+        final File file = chooser.getSelectedFile();
+        statusLabel.setText("Loading reference...");
+        referenceWorker = new SwingWorker<GroundTruthReference, Void>() {
+            @Override protected GroundTruthReference doInBackground() {
+                return GroundTruthLoader.load(file);
+            }
+
+            @Override protected void done() {
+                onReferenceLoaded(this);
+            }
+        };
+        updateControlState();
+        referenceWorker.execute();
+    }
+
+    private void onReferenceLoaded(SwingWorker<GroundTruthReference, Void> finishedWorker) {
+        try {
+            setGroundTruthReference(finishedWorker.get());
+            statusLabel.setText("Reference loaded.");
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            statusLabel.setText("Reference load interrupted.");
+        } catch (ExecutionException ex) {
+            IJ.showMessage("Test Counts", "Could not load reference:\n" + cleanMessage(ex.getCause()));
+        } finally {
+            if (finishedWorker == referenceWorker) {
+                referenceWorker = null;
+            }
+            updateControlState();
+        }
+    }
+
+    private void offerRoiManagerReference() {
+        if (GraphicsEnvironment.isHeadless() || groundTruthReference != null) {
+            return;
+        }
+        RoiManager manager = RoiManager.getInstance2();
+        if (manager == null || manager.getCount() <= 0) {
+            return;
+        }
+        int count = manager.getCount();
+        int answer = JOptionPane.showConfirmDialog(
+                dialog,
+                "Use the " + count + " ROIs in the ROI Manager?",
+                "Reference detected",
+                JOptionPane.YES_NO_OPTION);
+        if (answer != JOptionPane.YES_OPTION) {
+            return;
+        }
+        Roi[] rois = manager.getRoisAsArray();
+        setGroundTruthReference(GroundTruthLoader.fromRois("ROI Manager", rois));
+        statusLabel.setText("Reference loaded from ROI Manager.");
+    }
+
+    private void setGroundTruthReference(GroundTruthReference reference) {
+        groundTruthReference = reference;
+        if (reference == null || reference.isEmpty()) {
+            referenceLabel.setText("no reference");
+            groundTruthReference = null;
+        } else {
+            referenceLabel.setText(reference.size() + " objects loaded");
+        }
+        if (activeSettings != null) {
+            activeSettings = activeSettings.withGroundTruthReference(groundTruthReference);
+        }
+        setTableResults(results, groundTruthReference != null);
+        updateControlState();
+    }
+
     private void openMaskPreview() {
         ShootoutResult result = selectedResult();
         if (result == null) {
@@ -609,12 +774,28 @@ public final class ThresholdShootoutDialog {
             return;
         }
         closeImageQuietly(activeMaskPreview);
-        ImagePlus preview = new Duplicator().run(result.maskPreview);
+        ImagePlus preview;
+        if (activeSettings != null
+                && activeSettings.groundTruthReference != null
+                && result.perObjectStatus != null
+                && isFinite(result.f1)) {
+            preview = MaskPreviewRenderer.render(
+                    source,
+                    result.maskPreview,
+                    activeSettings.groundTruthReference,
+                    result.perObjectStatus,
+                    activeSettings,
+                    accessiblePalette.isSelected());
+        } else {
+            preview = new Duplicator().run(result.maskPreview);
+        }
         if (preview == null) {
             IJ.showMessage("Test Counts", "Could not duplicate the selected mask preview.");
             return;
         }
-        preview.setTitle("Macro Builder Count Mask - " + result.variant);
+        preview.setTitle((result.perObjectStatus == null
+                ? "Macro Builder Count Mask - "
+                : "Macro Builder Count Agreement - ") + result.variant);
         preview.show();
         if (preview.getWindow() != null) {
             WindowManager.setCurrentWindow(preview.getWindow());
@@ -678,7 +859,9 @@ public final class ThresholdShootoutDialog {
 
         List<Integer> selectedChannels = chooseBatchChannels();
         if (selectedChannels == null) return;
-        final ShootoutSettings settings = baseSettings.withChannelsToSweep(selectedChannels);
+        final ShootoutSettings settings = baseSettings
+                .withGroundTruthReference(null)
+                .withChannelsToSweep(selectedChannels);
         notifySettings(settings);
 
         final File csvFile = chooseBatchCsvFile();
@@ -931,7 +1114,7 @@ public final class ThresholdShootoutDialog {
 
     private static String buildCsv(List<ShootoutResult> rows) {
         StringBuilder csv = new StringBuilder();
-        csv.append("Variant,Count mode,Threshold value,Count,Mean size,Coverage %,Range,Status\n");
+        csv.append("Variant,Count mode,Threshold value,Count,Mean size,Coverage %,Range,Status,precision,recall,f1\n");
         for (ShootoutResult row : rows) {
             String[] values = new String[]{
                     row.variant,
@@ -941,7 +1124,10 @@ public final class ThresholdShootoutDialog {
                     row.countSummary == null ? "" : formatNumber(row.countSummary.meanSize),
                     row.countSummary == null ? "" : formatNumber(row.countSummary.coverage * 100.0),
                     rangeText(row),
-                    statusText(row)
+                    statusText(row),
+                    formatNumber(row.precision),
+                    formatNumber(row.recall),
+                    formatNumber(row.f1)
             };
             for (int i = 0; i < values.length; i++) {
                 if (i > 0) csv.append(',');
@@ -991,6 +1177,9 @@ public final class ThresholdShootoutDialog {
         minSize.setEnabled(!busy);
         maxSize.setEnabled(!busy);
         brightObjects.setEnabled(!busy && usesAuto(mode));
+        loadReferenceButton.setEnabled(!busy);
+        clearReferenceButton.setEnabled(!busy && groundTruthReference != null);
+        accessiblePalette.setEnabled(!busy && groundTruthReference != null);
         runButton.setEnabled(!busy);
         exportButton.setEnabled(!busy && !results.isEmpty());
         copyRecommendedButton.setEnabled(!busy
@@ -1004,7 +1193,7 @@ public final class ThresholdShootoutDialog {
     }
 
     private boolean isBusy() {
-        return isShootoutBusy() || isBatchBusy();
+        return isShootoutBusy() || isBatchBusy() || isReferenceBusy();
     }
 
     private boolean isShootoutBusy() {
@@ -1013,6 +1202,10 @@ public final class ThresholdShootoutDialog {
 
     private boolean isBatchBusy() {
         return batchWorker != null && !batchWorker.isDone();
+    }
+
+    private boolean isReferenceBusy() {
+        return referenceWorker != null && !referenceWorker.isDone();
     }
 
     private static boolean usesAuto(ShootoutSettings.ThresholdMode mode) {
@@ -1105,7 +1298,7 @@ public final class ThresholdShootoutDialog {
         if (value == Math.rint(value) && Math.abs(value) < 1000000000000000.0) {
             return Long.toString(Math.round(value));
         }
-        String formatted = String.format(Locale.US, "%.4f", value);
+        String formatted = String.format(Locale.ROOT, "%.4f", value);
         while (formatted.indexOf('.') >= 0 && formatted.endsWith("0")) {
             formatted = formatted.substring(0, formatted.length() - 1);
         }
@@ -1195,14 +1388,26 @@ public final class ThresholdShootoutDialog {
     private static final class ResultTableModel extends AbstractTableModel {
         private static final String[] COLUMNS = new String[]{
                 "Variant", "Count mode", "Threshold value", "Count",
-                "Mean size", "Coverage %", "Range", "Status"
+                "Mean size", "Coverage %", "Range", "Status",
+                "precision", "recall", "f1"
         };
 
         private List<ShootoutResult> rows = Collections.emptyList();
+        private boolean showScores;
 
-        void setResults(List<ShootoutResult> rows) {
+        void setResults(List<ShootoutResult> rows, boolean showScores) {
             this.rows = rows == null ? Collections.<ShootoutResult>emptyList() : rows;
-            fireTableDataChanged();
+            boolean structureChanged = this.showScores != showScores;
+            this.showScores = showScores;
+            if (structureChanged) {
+                fireTableStructureChanged();
+            } else {
+                fireTableDataChanged();
+            }
+        }
+
+        boolean isShowingScores() {
+            return showScores;
         }
 
         ShootoutResult resultAt(int row) {
@@ -1215,11 +1420,15 @@ public final class ThresholdShootoutDialog {
         }
 
         @Override public int getColumnCount() {
-            return COLUMNS.length;
+            return showScores ? COLUMNS.length : 8;
         }
 
         @Override public String getColumnName(int column) {
             return COLUMNS[column];
+        }
+
+        @Override public Class<?> getColumnClass(int columnIndex) {
+            return columnIndex >= 8 ? Double.class : String.class;
         }
 
         @Override public Object getValueAt(int rowIndex, int columnIndex) {
@@ -1234,8 +1443,57 @@ public final class ThresholdShootoutDialog {
                 case 5: return count == null ? "" : formatNumber(count.coverage * 100.0);
                 case 6: return rangeText(row);
                 case 7: return statusText(row);
+                case 8: return isFinite(row.precision) ? Double.valueOf(row.precision) : null;
+                case 9: return isFinite(row.recall) ? Double.valueOf(row.recall) : null;
+                case 10: return isFinite(row.f1) ? Double.valueOf(row.f1) : null;
                 default: return "";
             }
+        }
+    }
+
+    private static final class ScoreRenderer extends DefaultTableCellRenderer {
+        @Override public Component getTableCellRendererComponent(
+                JTable table,
+                Object value,
+                boolean isSelected,
+                boolean hasFocus,
+                int row,
+                int column) {
+            Component component = super.getTableCellRendererComponent(
+                    table, value, isSelected, hasFocus, row, column);
+            if (component instanceof JLabel) {
+                JLabel label = (JLabel) component;
+                label.setHorizontalAlignment(JLabel.RIGHT);
+                label.setText(value instanceof Number
+                        ? formatNumber(((Number) value).doubleValue())
+                        : "");
+            }
+            return component;
+        }
+    }
+
+    private static final class TooltipHeaderRenderer implements TableCellRenderer {
+        private final TableCellRenderer delegate;
+        private final String tooltip;
+
+        TooltipHeaderRenderer(TableCellRenderer delegate, String tooltip) {
+            this.delegate = delegate;
+            this.tooltip = tooltip;
+        }
+
+        @Override public Component getTableCellRendererComponent(
+                JTable table,
+                Object value,
+                boolean isSelected,
+                boolean hasFocus,
+                int row,
+                int column) {
+            Component component = delegate.getTableCellRendererComponent(
+                    table, value, isSelected, hasFocus, row, column);
+            if (component instanceof JLabel) {
+                ((JLabel) component).setToolTipText(tooltip);
+            }
+            return component;
         }
     }
 

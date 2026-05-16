@@ -21,6 +21,10 @@ public final class ShootoutResult {
     public final String error;
     public final boolean recommended;
     public final String recommendationReason;
+    public final double precision;
+    public final double recall;
+    public final double f1;
+    public final int[] perObjectStatus;
 
     private ShootoutResult(
             ShootoutSettings.CountingMode countingMode,
@@ -33,7 +37,11 @@ public final class ShootoutResult {
             Status status,
             String error,
             boolean recommended,
-            String recommendationReason) {
+            String recommendationReason,
+            double precision,
+            double recall,
+            double f1,
+            int[] perObjectStatus) {
         if (countingMode == null) {
             throw new IllegalArgumentException("countingMode must not be null");
         }
@@ -65,6 +73,10 @@ public final class ShootoutResult {
         this.error = error;
         this.recommended = recommended;
         this.recommendationReason = recommendationReason == null ? "" : recommendationReason;
+        this.precision = precision;
+        this.recall = recall;
+        this.f1 = f1;
+        this.perObjectStatus = perObjectStatus == null ? null : perObjectStatus.clone();
     }
 
     public static ShootoutResult success(
@@ -94,7 +106,11 @@ public final class ShootoutResult {
                 Status.SUCCESS,
                 null,
                 false,
-                "");
+                "",
+                Double.NaN,
+                Double.NaN,
+                Double.NaN,
+                null);
     }
 
     public static ShootoutResult failure(
@@ -123,7 +139,11 @@ public final class ShootoutResult {
                 Status.FAILED,
                 error,
                 false,
-                "");
+                "",
+                Double.NaN,
+                Double.NaN,
+                Double.NaN,
+                null);
     }
 
     public boolean isSuccess() {
@@ -142,6 +162,51 @@ public final class ShootoutResult {
                 status,
                 error,
                 true,
-                reason);
+                reason,
+                precision,
+                recall,
+                f1,
+                perObjectStatus);
+    }
+
+    public ShootoutResult withoutRecommendation() {
+        return new ShootoutResult(
+                countingMode,
+                variant,
+                thresholdValue,
+                imageMinimum,
+                imageMaximum,
+                maskPreview,
+                countSummary,
+                status,
+                error,
+                false,
+                "",
+                precision,
+                recall,
+                f1,
+                perObjectStatus);
+    }
+
+    public ShootoutResult withGroundTruthScore(GroundTruthScorer.ScoreSummary score) {
+        if (score == null) {
+            return this;
+        }
+        return new ShootoutResult(
+                countingMode,
+                variant,
+                thresholdValue,
+                imageMinimum,
+                imageMaximum,
+                maskPreview,
+                countSummary,
+                status,
+                error,
+                recommended,
+                recommendationReason,
+                score.precision,
+                score.recall,
+                score.f1,
+                score.perObjectStatus);
     }
 }

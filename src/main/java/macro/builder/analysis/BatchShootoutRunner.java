@@ -221,7 +221,7 @@ public final class BatchShootoutRunner {
         StringBuilder csv = new StringBuilder();
         csv.append("file,title,width,height,channels,slices,frames,counting_mode,variant,")
                 .append("threshold_value,count,mean_size,coverage,range_min,range_max,status,error,")
-                .append("series_index,channel_index\n");
+                .append("series_index,channel_index,precision,recall,f1\n");
         if (rows == null) {
             return csv.toString();
         }
@@ -246,7 +246,10 @@ public final class BatchShootoutRunner {
                     row.status.name(),
                     row.error,
                     row.seriesIndex < 0 ? "" : Integer.toString(row.seriesIndex),
-                    row.channelIndex > 0 ? Integer.toString(row.channelIndex) : ""
+                    row.channelIndex > 0 ? Integer.toString(row.channelIndex) : "",
+                    "",
+                    "",
+                    ""
             };
             for (int i = 0; i < values.length; i++) {
                 if (i > 0) csv.append(',');

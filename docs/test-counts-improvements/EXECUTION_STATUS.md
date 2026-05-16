@@ -27,3 +27,4 @@ W2 - 04_batch-bioformats-and-channels: completed at 2026-05-16T18:20:58.0932460+
 W3 - 03_histogram-and-curve-charts: completed at 2026-05-16T18:35:24.3748946+01:00 (commit 7af8af6)
 W4 - 05_ground-truth-scoring: completed at 2026-05-16T18:54:51.0434567+01:00 (commit 5d3b3ac)
 W5 - 06_quality-score-columns: completed at 2026-05-16T19:07:55.2452488+01:00 (commit 5f1148e)
+W6 - 07_fragility-bar: completed at 2026-05-16T19:29:35.1147400+01:00 (commit 37541ba)

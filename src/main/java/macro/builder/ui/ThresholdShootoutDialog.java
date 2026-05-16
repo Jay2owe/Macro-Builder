@@ -8,6 +8,7 @@ import ij.plugin.Duplicator;
 import ij.plugin.frame.RoiManager;
 import macro.builder.analysis.BatchShootoutResult;
 import macro.builder.analysis.BatchShootoutRunner;
+import macro.builder.analysis.ConsensusMaskBuilder;
 import macro.builder.analysis.GroundTruthLoader;
 import macro.builder.analysis.GroundTruthReference;
 import macro.builder.analysis.ObjectCounter;
@@ -91,6 +92,8 @@ public final class ThresholdShootoutDialog {
             "How different the two groups look as distributions. 0 means identical; 1 means as distinct as possible.";
     private static final String FRAGILITY_TOOLTIP =
             "How much the count changes if the threshold or image brightness moves slightly. Lower is steadier.";
+    private static final String AGREEMENT_TOOLTIP =
+            "How much this method overlaps with the majority of the other methods. Lower means this method picked different objects.";
 
     private final ImagePlus source;
     private final String macro;
@@ -126,6 +129,7 @@ public final class ThresholdShootoutDialog {
     private final JTable table = new JTable(tableModel);
     private final JButton runButton = new JButton("Run");
     private final JButton previewButton = new JButton("Open mask preview");
+    private final JButton consensusButton = new JButton("Show consensus mask");
     private final JButton exportButton = new JButton("Export CSV...");
     private final JButton copyRecommendedButton = new JButton("Copy recommended value");
     private final JButton batchButton = new JButton("Run batch...");
@@ -136,11 +140,14 @@ public final class ThresholdShootoutDialog {
     private ShootoutRun activeShootoutRun;
     private ShootoutSettings activeSettings;
     private ImagePlus activeMaskPreview;
+    private ImagePlus activeConsensusMask;
+    private ImagePlus activeConsensusPreview;
     private SwingWorker<ShootoutUiResult, Void> worker;
     private SwingWorker<BatchRunResult, Void> batchWorker;
     private SwingWorker<GroundTruthReference, Void> referenceWorker;
     private volatile boolean batchCancelRequested;
     private boolean closed;
+    private String agreementStatusMessage;
 
     private ThresholdShootoutDialog(
             Window owner,
@@ -268,6 +275,7 @@ public final class ThresholdShootoutDialog {
 
         JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
         left.add(previewButton);
+        left.add(consensusButton);
         left.add(exportButton);
         left.add(copyRecommendedButton);
         left.add(batchButton);
@@ -283,6 +291,11 @@ public final class ThresholdShootoutDialog {
         previewButton.addActionListener(new ActionListener() {
             @Override public void actionPerformed(ActionEvent e) {
                 openMaskPreview();
+            }
+        });
+        consensusButton.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                openConsensusMask();
             }
         });
         exportButton.addActionListener(new ActionListener() {
@@ -323,6 +336,10 @@ public final class ThresholdShootoutDialog {
                 batchCancelRequested = true;
                 closeImageQuietly(activeMaskPreview);
                 activeMaskPreview = null;
+                closeImageQuietly(activeConsensusPreview);
+                activeConsensusPreview = null;
+                closeImageQuietly(activeConsensusMask);
+                activeConsensusMask = null;
                 closeResultImages(results);
                 closeShootoutRun(activeShootoutRun);
                 activeShootoutRun = null;
@@ -487,6 +504,7 @@ public final class ThresholdShootoutDialog {
         if ("Range".equals(name)) return 140;
         if ("Status".equals(name)) return 220;
         if ("Fragility".equals(name)) return 130;
+        if ("Agreement".equals(name)) return 100;
         return 90;
     }
 
@@ -506,7 +524,8 @@ public final class ThresholdShootoutDialog {
                 || "recall".equals(name)
                 || "f1".equals(name)
                 || "Separation".equals(name)
-                || "Distinctness".equals(name);
+                || "Distinctness".equals(name)
+                || "Agreement".equals(name);
     }
 
     private static String tooltipForColumnName(String name) {
@@ -514,6 +533,7 @@ public final class ThresholdShootoutDialog {
         if ("Separation".equals(name)) return SEPARATION_TOOLTIP;
         if ("Distinctness".equals(name)) return DISTINCTNESS_TOOLTIP;
         if ("Fragility".equals(name)) return FRAGILITY_TOOLTIP;
+        if ("Agreement".equals(name)) return AGREEMENT_TOOLTIP;
         return null;
     }
 
@@ -536,9 +556,14 @@ public final class ThresholdShootoutDialog {
 
         closeImageQuietly(activeMaskPreview);
         activeMaskPreview = null;
+        closeImageQuietly(activeConsensusPreview);
+        activeConsensusPreview = null;
+        closeImageQuietly(activeConsensusMask);
+        activeConsensusMask = null;
         closeResultImages(results);
         closeShootoutRun(activeShootoutRun);
         activeShootoutRun = null;
+        agreementStatusMessage = null;
         results = Collections.emptyList();
         setTableResults(results, settings.groundTruthReference != null);
         chartPanel.hideForRun();
@@ -549,14 +574,17 @@ public final class ThresholdShootoutDialog {
         final int chartHeight = chartPanel.chartHeight();
         worker = new SwingWorker<ShootoutUiResult, Void>() {
             @Override protected ShootoutUiResult doInBackground() {
-                ShootoutRun run = new ThresholdShootoutRunner().runWithContext(
+                ThresholdShootoutRunner runner = new ThresholdShootoutRunner();
+                ShootoutRun run = runner.runWithContext(
                         source,
                         macro,
                         settings,
                         primaryChannel,
                         createMacroProgress("Running count macro"));
+                ImagePlus consensus = runner.takeConsensusMask();
+                String agreementStatus = runner.takeAgreementStatusMessage();
                 ChartImages charts = renderCharts(run, chartWidth, chartHeight);
-                return new ShootoutUiResult(run, charts);
+                return new ShootoutUiResult(run, charts, consensus, agreementStatus);
             }
 
             @Override protected void done() {
@@ -594,6 +622,7 @@ public final class ThresholdShootoutDialog {
         if (closed || !dialog.isDisplayable()) {
             closeResultImages(rows);
             if (result != null) {
+                closeImageQuietly(result.consensusMask);
                 closeShootoutRun(result.run);
             }
             return;
@@ -601,6 +630,8 @@ public final class ThresholdShootoutDialog {
 
         if (result != null) {
             activeShootoutRun = result.run;
+            activeConsensusMask = result.consensusMask;
+            agreementStatusMessage = result.agreementStatusMessage;
         }
         results = rows == null ? Collections.<ShootoutResult>emptyList() : rows;
         setTableResults(results, activeSettings != null && activeSettings.groundTruthReference != null);
@@ -608,7 +639,9 @@ public final class ThresholdShootoutDialog {
         if (!results.isEmpty()) {
             table.setRowSelectionInterval(0, 0);
         }
-        if (!failed
+        if (!failed && agreementStatusMessage != null && !agreementStatusMessage.trim().isEmpty()) {
+            statusLabel.setText(agreementStatusMessage);
+        } else if (!failed
                 && selectedThresholdMode() == ShootoutSettings.ThresholdMode.AUTO_GRID
                 && hasSuccessfulRows(results)
                 && recommendedResult() == null) {
@@ -654,7 +687,8 @@ public final class ThresholdShootoutDialog {
                 rows,
                 showScores,
                 showQualityColumns.isSelected(),
-                runFragilityChecks.isSelected());
+                runFragilityChecks.isSelected(),
+                agreementColumnAvailable(rows));
         configureTableColumns();
     }
 
@@ -866,6 +900,32 @@ public final class ThresholdShootoutDialog {
             WindowManager.setCurrentWindow(preview.getWindow());
         }
         activeMaskPreview = preview;
+    }
+
+    private void openConsensusMask() {
+        if (!agreementColumnAvailable(results)) {
+            IJ.showMessage("Test Counts", "At least 3 successful methods are needed for a consensus mask.");
+            return;
+        }
+        if (activeConsensusMask == null) {
+            String message = agreementStatusMessage == null || agreementStatusMessage.trim().isEmpty()
+                    ? "The consensus mask is not available for this run."
+                    : agreementStatusMessage;
+            IJ.showMessage("Test Counts", message);
+            return;
+        }
+        closeImageQuietly(activeConsensusPreview);
+        ImagePlus preview = new Duplicator().run(activeConsensusMask);
+        if (preview == null) {
+            IJ.showMessage("Test Counts", "Could not duplicate the consensus mask.");
+            return;
+        }
+        preview.setTitle(ConsensusMaskBuilder.CONSENSUS_TITLE);
+        preview.show();
+        if (preview.getWindow() != null) {
+            WindowManager.setCurrentWindow(preview.getWindow());
+        }
+        activeConsensusPreview = preview;
     }
 
     private void exportCsv() {
@@ -1181,7 +1241,7 @@ public final class ThresholdShootoutDialog {
         StringBuilder csv = new StringBuilder();
         csv.append("Variant,Count mode,Threshold value,Count,Mean size,Coverage %,Range,Status,")
                 .append("precision,recall,f1,separation,distinctness,")
-                .append("fragility_score,fragility_range_min,fragility_range_max\n");
+                .append("fragility_score,fragility_range_min,fragility_range_max,agreement_score\n");
         for (ShootoutResult row : rows) {
             String[] values = new String[]{
                     row.variant,
@@ -1199,7 +1259,8 @@ public final class ThresholdShootoutDialog {
                     formatNumber(row.distinctnessScore),
                     formatNumber(row.fragilityScore),
                     fragilityRangeMinimum(row),
-                    fragilityRangeMaximum(row)
+                    fragilityRangeMaximum(row),
+                    formatAgreementScore(row.agreementScore)
             };
             for (int i = 0; i < values.length; i++) {
                 if (i > 0) csv.append(',');
@@ -1243,6 +1304,11 @@ public final class ThresholdShootoutDialog {
                 && isFinite(row.fragilityScore);
     }
 
+    private static String formatAgreementScore(double value) {
+        if (Double.isNaN(value)) return "NaN";
+        return formatNumber(value);
+    }
+
     private ShootoutResult selectedResult() {
         int viewRow = table.getSelectedRow();
         if (viewRow < 0) return null;
@@ -1264,6 +1330,20 @@ public final class ThresholdShootoutDialog {
         for (ShootoutResult row : rows) {
             if (row != null && row.isSuccess()) {
                 return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean agreementColumnAvailable(List<ShootoutResult> rows) {
+        if (rows == null) return false;
+        int successes = 0;
+        for (ShootoutResult row : rows) {
+            if (row != null && row.isSuccess()) {
+                successes++;
+                if (successes >= ConsensusMaskBuilder.MIN_SUCCESSFUL_MASKS) {
+                    return true;
+                }
             }
         }
         return false;
@@ -1307,6 +1387,16 @@ public final class ThresholdShootoutDialog {
 
         ShootoutResult selected = selectedResult();
         previewButton.setEnabled(!busy && selected != null && selected.isSuccess() && selected.maskPreview != null);
+        boolean enoughAgreementRows = agreementColumnAvailable(results);
+        consensusButton.setEnabled(!busy && enoughAgreementRows && activeConsensusMask != null);
+        if (!enoughAgreementRows) {
+            consensusButton.setToolTipText("At least 3 successful methods are needed for a consensus mask.");
+        } else if (activeConsensusMask == null && agreementStatusMessage != null
+                && !agreementStatusMessage.trim().isEmpty()) {
+            consensusButton.setToolTipText(agreementStatusMessage);
+        } else {
+            consensusButton.setToolTipText(null);
+        }
     }
 
     private boolean isBusy() {
@@ -1475,10 +1565,18 @@ public final class ThresholdShootoutDialog {
     private static final class ShootoutUiResult {
         final ShootoutRun run;
         final ChartImages charts;
+        final ImagePlus consensusMask;
+        final String agreementStatusMessage;
 
-        ShootoutUiResult(ShootoutRun run, ChartImages charts) {
+        ShootoutUiResult(
+                ShootoutRun run,
+                ChartImages charts,
+                ImagePlus consensusMask,
+                String agreementStatusMessage) {
             this.run = run;
             this.charts = charts == null ? ChartImages.hidden() : charts;
+            this.consensusMask = consensusMask;
+            this.agreementStatusMessage = agreementStatusMessage;
         }
 
         List<ShootoutResult> rows() {
@@ -1506,25 +1604,29 @@ public final class ThresholdShootoutDialog {
         private static final String[] COLUMNS = new String[]{
                 "Variant", "Count mode", "Threshold value", "Count",
                 "Mean size", "Coverage %", "Range", "Status",
-                "precision", "recall", "f1", "Separation", "Distinctness", "Fragility"
+                "precision", "recall", "f1", "Separation", "Distinctness", "Fragility", "Agreement"
         };
 
         private List<ShootoutResult> rows = Collections.emptyList();
         private boolean showScores;
         private boolean showQualityScores;
         private boolean showFragilityValues;
+        private boolean showAgreementColumn;
 
         void setResults(
                 List<ShootoutResult> rows,
                 boolean showScores,
                 boolean showQualityScores,
-                boolean showFragilityValues) {
+                boolean showFragilityValues,
+                boolean showAgreementColumn) {
             this.rows = rows == null ? Collections.<ShootoutResult>emptyList() : rows;
             boolean structureChanged = this.showScores != showScores
-                    || this.showQualityScores != showQualityScores;
+                    || this.showQualityScores != showQualityScores
+                    || this.showAgreementColumn != showAgreementColumn;
             this.showScores = showScores;
             this.showQualityScores = showQualityScores;
             this.showFragilityValues = showFragilityValues;
+            this.showAgreementColumn = showAgreementColumn;
             if (structureChanged) {
                 fireTableStructureChanged();
             } else {
@@ -1542,7 +1644,8 @@ public final class ThresholdShootoutDialog {
         }
 
         @Override public int getColumnCount() {
-            return 9 + (showScores ? 3 : 0) + (showQualityScores ? 2 : 0);
+            return 9 + (showScores ? 3 : 0) + (showQualityScores ? 2 : 0)
+                    + (showAgreementColumn ? 1 : 0);
         }
 
         @Override public String getColumnName(int column) {
@@ -1575,6 +1678,7 @@ public final class ThresholdShootoutDialog {
                 case 11: return isFinite(row.separationScore) ? Double.valueOf(row.separationScore) : null;
                 case 12: return isFinite(row.distinctnessScore) ? Double.valueOf(row.distinctnessScore) : null;
                 case 13: return showFragilityValues ? fragilityValue(row) : FragilityBarRenderer.Value.empty();
+                case 14: return isFinite(row.agreementScore) ? Double.valueOf(row.agreementScore) : null;
                 default: return "";
             }
         }
@@ -1593,7 +1697,13 @@ public final class ThresholdShootoutDialog {
             if (showQualityScores && visibleColumn < offset + 2) {
                 return 11 + visibleColumn - offset;
             }
-            return 13;
+            if (showQualityScores) {
+                offset += 2;
+            }
+            if (visibleColumn == offset) {
+                return 13;
+            }
+            return 14;
         }
     }
 

@@ -24,6 +24,9 @@ public final class ThresholdShootoutRunner {
     private static final int HISTOGRAM_BINS = 256;
     private static final int SLICE_PARALLEL_THRESHOLD = 4;
 
+    private ImagePlus lastConsensusMask;
+    private String lastAgreementStatusMessage;
+
     public List<ShootoutResult> run(ImagePlus source, String macro, ShootoutSettings settings) {
         return run(source, macro, settings, null);
     }
@@ -47,6 +50,7 @@ public final class ThresholdShootoutRunner {
             return new ArrayList<ShootoutResult>(run.results);
         } finally {
             closeProcessed(run.context);
+            closeImageQuietly(takeConsensusMask());
         }
     }
 
@@ -68,6 +72,7 @@ public final class ThresholdShootoutRunner {
             ShootoutSettings settings,
             int primaryChannel,
             FilterExecutor.Progress progress) {
+        resetAgreementState();
         if (source == null) {
             throw new IllegalArgumentException("source must not be null");
         }
@@ -104,7 +109,19 @@ public final class ThresholdShootoutRunner {
         return ShootoutSettings.defaultAutoMethods();
     }
 
-    private static List<ShootoutResult> runThresholds(ShootoutContext context, ShootoutSettings settings) {
+    public ImagePlus takeConsensusMask() {
+        ImagePlus mask = lastConsensusMask;
+        lastConsensusMask = null;
+        return mask;
+    }
+
+    public String takeAgreementStatusMessage() {
+        String message = lastAgreementStatusMessage;
+        lastAgreementStatusMessage = null;
+        return message;
+    }
+
+    private List<ShootoutResult> runThresholds(ShootoutContext context, ShootoutSettings settings) {
         List<ShootoutResult> rows = new ArrayList<ShootoutResult>();
 
         if (usesAuto(settings.thresholdMode)) {
@@ -131,6 +148,7 @@ public final class ThresholdShootoutRunner {
             rows.addAll(withRecommendedPlateau(withGridFragility(gridRows, settings)));
         }
 
+        rows = withAgreement(rows);
         if (settings.groundTruthReference != null) {
             return withRecommendedReferenceWinner(rows);
         }
@@ -343,6 +361,72 @@ public final class ThresholdShootoutRunner {
         return result.withFragility(
                 FragilityProbe.scoreFrom(samples, result.countSummary.count),
                 samples);
+    }
+
+    private List<ShootoutResult> withAgreement(List<ShootoutResult> rows) {
+        if (rows == null || rows.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        List<ImagePlus> masks = successfulMasks(rows);
+        if (masks.size() < ConsensusMaskBuilder.MIN_SUCCESSFUL_MASKS) {
+            return rows;
+        }
+
+        long estimatedBytes = ConsensusMaskBuilder.estimateRetainedBytes(masks);
+        if (estimatedBytes > ConsensusMaskBuilder.RETAINED_MASK_CAP_BYTES) {
+            lastAgreementStatusMessage = "Agreement skipped: mask memory estimate "
+                    + bytesText(estimatedBytes) + " exceeds the 256 MiB cap.";
+            return withoutRetainedMasks(rows);
+        }
+
+        try {
+            ConsensusMaskBuilder.ConsensusResult consensus = ConsensusMaskBuilder.build(masks);
+            lastConsensusMask = consensus.consensusMask;
+            return withAgreementScores(rows, consensus.agreementScores);
+        } catch (RuntimeException ex) {
+            lastAgreementStatusMessage = "Agreement skipped: " + cleanMessage(ex);
+            return rows;
+        }
+    }
+
+    private static List<ImagePlus> successfulMasks(List<ShootoutResult> rows) {
+        List<ImagePlus> masks = new ArrayList<ImagePlus>();
+        for (ShootoutResult row : rows) {
+            if (row != null && row.isSuccess() && row.maskPreview != null) {
+                masks.add(row.maskPreview);
+            }
+        }
+        return masks;
+    }
+
+    private static List<ShootoutResult> withAgreementScores(List<ShootoutResult> rows, double[] scores) {
+        List<ShootoutResult> updated = new ArrayList<ShootoutResult>(rows.size());
+        int scoreIndex = 0;
+        for (ShootoutResult row : rows) {
+            if (row != null && row.isSuccess() && row.maskPreview != null) {
+                double score = scoreIndex < scores.length ? scores[scoreIndex] : Double.NaN;
+                updated.add(row.withAgreement(score));
+                scoreIndex++;
+            } else {
+                updated.add(row);
+            }
+        }
+        return updated;
+    }
+
+    private static List<ShootoutResult> withoutRetainedMasks(List<ShootoutResult> rows) {
+        List<ShootoutResult> updated = new ArrayList<ShootoutResult>(rows.size());
+        for (ShootoutResult row : rows) {
+            if (row != null && row.isSuccess() && row.maskPreview != null) {
+                ImagePlus mask = row.maskPreview;
+                updated.add(row.withoutMaskPreview());
+                closeImageQuietly(mask);
+            } else {
+                updated.add(row);
+            }
+        }
+        return updated;
     }
 
     private static List<ShootoutResult> withRecommendedReferenceWinner(List<ShootoutResult> rows) {
@@ -812,6 +896,21 @@ public final class ThresholdShootoutRunner {
             return ex.getClass().getSimpleName();
         }
         return message.trim();
+    }
+
+    private void resetAgreementState() {
+        closeImageQuietly(lastConsensusMask);
+        lastConsensusMask = null;
+        lastAgreementStatusMessage = null;
+    }
+
+    private static String bytesText(long bytes) {
+        long mib = 1024L * 1024L;
+        if (bytes == Long.MAX_VALUE) {
+            return "more than " + Long.toString(Long.MAX_VALUE / mib) + " MiB";
+        }
+        long rounded = (bytes + mib - 1L) / mib;
+        return Long.toString(rounded) + " MiB";
     }
 
     private static boolean isFinite(double value) {

@@ -7,6 +7,7 @@ import ij.plugin.Duplicator;
 import macro.builder.analysis.BatchShootoutResult;
 import macro.builder.analysis.BatchShootoutRunner;
 import macro.builder.analysis.ObjectCounter;
+import macro.builder.analysis.ShootoutRun;
 import macro.builder.analysis.ShootoutResult;
 import macro.builder.analysis.ShootoutSettings;
 import macro.builder.analysis.ThresholdShootoutRunner;
@@ -56,6 +57,7 @@ import java.awt.event.ActionListener;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.awt.datatransfer.StringSelection;
+import java.awt.image.BufferedImage;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -97,6 +99,7 @@ public final class ThresholdShootoutDialog {
     private final JLabel rangeLabel = new JLabel("Macro output range: not run yet.");
     private final JLabel statusLabel = new JLabel(" ");
     private final JProgressBar progressBar = new JProgressBar(0, 100);
+    private final ChartPanel chartPanel = new ChartPanel();
     private final ResultTableModel tableModel = new ResultTableModel();
     private final JTable table = new JTable(tableModel);
     private final JButton runButton = new JButton("Run");
@@ -107,8 +110,9 @@ public final class ThresholdShootoutDialog {
     private final JButton cancelBatchButton = new JButton("Cancel batch");
 
     private List<ShootoutResult> results = Collections.emptyList();
+    private ShootoutRun activeShootoutRun;
     private ImagePlus activeMaskPreview;
-    private SwingWorker<List<ShootoutResult>, Void> worker;
+    private SwingWorker<ShootoutUiResult, Void> worker;
     private SwingWorker<BatchRunResult, Void> batchWorker;
     private volatile boolean batchCancelRequested;
     private boolean closed;
@@ -205,7 +209,10 @@ public final class ThresholdShootoutDialog {
         scroll.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createEmptyBorder(0, 12, 0, 12),
                 BorderFactory.createTitledBorder("Results")));
-        dialog.add(scroll, BorderLayout.CENTER);
+        JPanel center = new JPanel(new BorderLayout(0, 0));
+        center.add(chartPanel, BorderLayout.NORTH);
+        center.add(scroll, BorderLayout.CENTER);
+        dialog.add(center, BorderLayout.CENTER);
 
         JPanel footer = new JPanel(new BorderLayout());
         footer.setBorder(BorderFactory.createEmptyBorder(0, 12, 10, 12));
@@ -276,6 +283,8 @@ public final class ThresholdShootoutDialog {
                 closeImageQuietly(activeMaskPreview);
                 activeMaskPreview = null;
                 closeResultImages(results);
+                closeShootoutRun(activeShootoutRun);
+                activeShootoutRun = null;
             }
         });
     }
@@ -388,19 +397,26 @@ public final class ThresholdShootoutDialog {
         closeImageQuietly(activeMaskPreview);
         activeMaskPreview = null;
         closeResultImages(results);
+        closeShootoutRun(activeShootoutRun);
+        activeShootoutRun = null;
         results = Collections.emptyList();
         tableModel.setResults(results);
+        chartPanel.hideForRun();
         rangeLabel.setText("Macro output range: running...");
         statusLabel.setText("Running count shootout...");
         setProgressIndeterminate("Running count macro...");
-        worker = new SwingWorker<List<ShootoutResult>, Void>() {
-            @Override protected List<ShootoutResult> doInBackground() {
-                return new ThresholdShootoutRunner().run(
+        final int chartWidth = chartPanel.chartWidth();
+        final int chartHeight = chartPanel.chartHeight();
+        worker = new SwingWorker<ShootoutUiResult, Void>() {
+            @Override protected ShootoutUiResult doInBackground() {
+                ShootoutRun run = new ThresholdShootoutRunner().runWithContext(
                         source,
                         macro,
                         settings,
                         primaryChannel,
                         createMacroProgress("Running count macro"));
+                ChartImages charts = renderCharts(run, chartWidth, chartHeight);
+                return new ShootoutUiResult(run, charts);
             }
 
             @Override protected void done() {
@@ -411,11 +427,13 @@ public final class ThresholdShootoutDialog {
         worker.execute();
     }
 
-    private void onShootoutDone(SwingWorker<List<ShootoutResult>, Void> finishedWorker) {
+    private void onShootoutDone(SwingWorker<ShootoutUiResult, Void> finishedWorker) {
+        ShootoutUiResult result = null;
         List<ShootoutResult> rows;
         boolean failed = false;
         try {
-            rows = finishedWorker.get();
+            result = finishedWorker.get();
+            rows = result == null ? Collections.<ShootoutResult>emptyList() : result.rows();
         } catch (InterruptedException ie) {
             Thread.currentThread().interrupt();
             rows = Collections.emptyList();
@@ -435,9 +453,15 @@ public final class ThresholdShootoutDialog {
 
         if (closed || !dialog.isDisplayable()) {
             closeResultImages(rows);
+            if (result != null) {
+                closeShootoutRun(result.run);
+            }
             return;
         }
 
+        if (result != null) {
+            activeShootoutRun = result.run;
+        }
         results = rows == null ? Collections.<ShootoutResult>emptyList() : rows;
         tableModel.setResults(results);
         updateRangeLabel(results);
@@ -456,7 +480,33 @@ public final class ThresholdShootoutDialog {
         if (!failed) {
             setProgressValue(100, "Count shootout complete.");
         }
+        updateChartsLater(result, failed);
         updateControlState();
+    }
+
+    private ChartImages renderCharts(ShootoutRun run, int width, int height) {
+        if (run == null || run.context == null || GraphicsEnvironment.isHeadless()) {
+            return ChartImages.hidden();
+        }
+        try {
+            BufferedImage histogram = ChartRenderer.renderHistogram(run.context, run.results, width, height);
+            BufferedImage curve = ChartRenderer.renderCurve(run.context, run.results, width, height);
+            return new ChartImages(histogram, curve);
+        } catch (Throwable ignored) {
+            return ChartImages.hidden();
+        }
+    }
+
+    private void updateChartsLater(final ShootoutUiResult result, final boolean failed) {
+        SwingUtilities.invokeLater(new Runnable() {
+            @Override public void run() {
+                if (closed || !dialog.isDisplayable() || failed || result == null || !result.charts.visible) {
+                    chartPanel.hideForRun();
+                    return;
+                }
+                chartPanel.setImages(result.charts.histogram, result.charts.curve);
+            }
+        });
     }
 
     private ShootoutSettings buildSettings() {
@@ -990,6 +1040,12 @@ public final class ThresholdShootoutDialog {
         }
     }
 
+    private static void closeShootoutRun(ShootoutRun run) {
+        if (run != null && run.context != null) {
+            closeImageQuietly(run.context.processed);
+        }
+    }
+
     private static void closeImageQuietly(ImagePlus imp) {
         if (imp == null) return;
         try {
@@ -1103,6 +1159,36 @@ public final class ThresholdShootoutDialog {
             this.rows = rows == null ? Collections.<BatchShootoutResult>emptyList() : rows;
             this.csvFile = csvFile;
             this.cancelled = cancelled;
+        }
+    }
+
+    private static final class ShootoutUiResult {
+        final ShootoutRun run;
+        final ChartImages charts;
+
+        ShootoutUiResult(ShootoutRun run, ChartImages charts) {
+            this.run = run;
+            this.charts = charts == null ? ChartImages.hidden() : charts;
+        }
+
+        List<ShootoutResult> rows() {
+            return run == null ? Collections.<ShootoutResult>emptyList() : run.results;
+        }
+    }
+
+    private static final class ChartImages {
+        final BufferedImage histogram;
+        final BufferedImage curve;
+        final boolean visible;
+
+        ChartImages(BufferedImage histogram, BufferedImage curve) {
+            this.histogram = histogram;
+            this.curve = curve;
+            this.visible = histogram != null && curve != null;
+        }
+
+        static ChartImages hidden() {
+            return new ChartImages(null, null);
         }
     }
 

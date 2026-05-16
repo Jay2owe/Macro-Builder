@@ -80,17 +80,10 @@ public final class ThresholdShootoutRunner {
             throw new IllegalArgumentException("settings must not be null");
         }
 
-        ImagePlus processed = duplicateForMacro(source, macro, primaryChannel);
-        if (processed == null) {
-            List<ShootoutResult> rows = new ArrayList<ShootoutResult>();
-            rows.add(ShootoutResult.failure(settings.countingMode, "Macro", null, "Could not duplicate source image"));
-            return new ShootoutRun(null, rows);
-        }
-
+        ShootoutContext context = null;
         boolean transferProcessed = false;
         try {
-            FilterExecutor.runThreadSafe(processed, macro == null ? "" : macro, progress);
-            ShootoutContext context = buildContext(processed);
+            context = prepareContext(source, macro, primaryChannel, progress);
             List<ShootoutResult> rows = runThresholds(context, settings);
             transferProcessed = true;
             return new ShootoutRun(context, rows);
@@ -100,7 +93,7 @@ public final class ThresholdShootoutRunner {
             return new ShootoutRun(null, rows);
         } finally {
             if (!transferProcessed) {
-                closeImageQuietly(processed);
+                closeProcessed(context);
             }
         }
     }
@@ -117,6 +110,68 @@ public final class ThresholdShootoutRunner {
             throw new IllegalArgumentException("settings must not be null");
         }
         return runFixedVariant(context, settings, value, pinnedLabel(value));
+    }
+
+    public ShootoutResult runOneVariant(
+            ShootoutContext context,
+            ShootoutSettings settings,
+            String variant,
+            Double thresholdValue) {
+        if (context == null) {
+            throw new IllegalArgumentException("context must not be null");
+        }
+        if (settings == null) {
+            throw new IllegalArgumentException("settings must not be null");
+        }
+        String label = safeVariantLabel(variant);
+        if (isAutoMethodName(label)) {
+            return runAutoVariant(context, settings, label);
+        }
+        Double value = thresholdValue == null ? thresholdValueFromLabel(label) : thresholdValue;
+        if (value != null && isFinite(value.doubleValue())) {
+            if (isGridLabel(label)) {
+                return runGridVariant(context, settings, value.doubleValue(), label);
+            }
+            return runFixedVariant(context, settings, value.doubleValue(), label);
+        }
+        return ShootoutResult.failure(
+                sourceForVariant(label),
+                settings.countingMode,
+                label,
+                null,
+                context.rangeMin,
+                context.rangeMax,
+                "No threshold value was available for this variant.");
+    }
+
+    public ShootoutResult runOneVariant(
+            ImagePlus source,
+            String macro,
+            ShootoutSettings settings,
+            int primaryChannel,
+            String variant,
+            Double thresholdValue,
+            FilterExecutor.Progress progress) {
+        resetAgreementState();
+        if (settings == null) {
+            throw new IllegalArgumentException("settings must not be null");
+        }
+        ShootoutContext context = null;
+        String label = safeVariantLabel(variant);
+        try {
+            context = prepareContext(source, macro, primaryChannel, progress);
+            return runOneVariant(context, settings, label, thresholdValue);
+        } catch (RuntimeException ex) {
+            return ShootoutResult.failure(
+                    sourceForVariant(label),
+                    settings.countingMode,
+                    label,
+                    thresholdValue,
+                    cleanMessage(ex));
+        } finally {
+            closeProcessed(context);
+            closeImageQuietly(takeConsensusMask());
+        }
     }
 
     public ImagePlus takeConsensusMask() {
@@ -236,7 +291,14 @@ public final class ThresholdShootoutRunner {
             ShootoutContext context,
             ShootoutSettings settings,
             double value) {
-        String label = gridLabel(value);
+        return runGridVariant(context, settings, value, gridLabel(value));
+    }
+
+    private static ShootoutResult runGridVariant(
+            ShootoutContext context,
+            ShootoutSettings settings,
+            double value,
+            String label) {
         try {
             ImagePlus mask = createMask(context.processed, label + " mask", value, context.rangeMax);
             ObjectCounter.CountSummary count = ObjectCounter.count(mask, settings);
@@ -692,6 +754,31 @@ public final class ThresholdShootoutRunner {
                 containsFloatProcessor(processed));
     }
 
+    private static ShootoutContext prepareContext(
+            ImagePlus source,
+            String macro,
+            int primaryChannel,
+            FilterExecutor.Progress progress) {
+        if (source == null) {
+            throw new IllegalArgumentException("source must not be null");
+        }
+        ImagePlus processed = duplicateForMacro(source, macro, primaryChannel);
+        if (processed == null) {
+            throw new IllegalStateException("Could not duplicate source image");
+        }
+        boolean transferProcessed = false;
+        try {
+            FilterExecutor.runThreadSafe(processed, macro == null ? "" : macro, progress);
+            ShootoutContext context = buildContext(processed);
+            transferProcessed = true;
+            return context;
+        } finally {
+            if (!transferProcessed) {
+                closeImageQuietly(processed);
+            }
+        }
+    }
+
     private static Range measureRange(ImagePlus image) {
         ImageStack stack = image.getStack();
         double minimum = Double.POSITIVE_INFINITY;
@@ -898,6 +985,58 @@ public final class ThresholdShootoutRunner {
 
     private static String gridLabel(double value) {
         return "Grid " + shortNumber(value);
+    }
+
+    private static String safeVariantLabel(String variant) {
+        if (variant == null || variant.trim().isEmpty()) {
+            return "Selected variant";
+        }
+        return variant.trim();
+    }
+
+    private static boolean isAutoMethodName(String variant) {
+        try {
+            AutoThresholder.Method.valueOf(variant);
+            return true;
+        } catch (RuntimeException ex) {
+            return false;
+        }
+    }
+
+    private static boolean isGridLabel(String variant) {
+        return variant != null && variant.startsWith("Grid ");
+    }
+
+    private static Double thresholdValueFromLabel(String label) {
+        if (label == null) {
+            return null;
+        }
+        String value = null;
+        if (label.startsWith("Fixed ")) {
+            value = label.substring("Fixed ".length());
+        } else if (label.startsWith("Grid ")) {
+            value = label.substring("Grid ".length());
+        } else if (label.startsWith("Pinned ")) {
+            value = label.substring("Pinned ".length());
+        }
+        if (value == null || value.trim().isEmpty()) {
+            return null;
+        }
+        try {
+            return Double.valueOf(Double.parseDouble(value.trim()));
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
+    }
+
+    private static ShootoutResult.Source sourceForVariant(String variant) {
+        if (isAutoMethodName(variant)) {
+            return ShootoutResult.Source.AUTO;
+        }
+        if (isGridLabel(variant)) {
+            return ShootoutResult.Source.GRID;
+        }
+        return ShootoutResult.Source.FIXED;
     }
 
     private static String shortNumber(double value) {

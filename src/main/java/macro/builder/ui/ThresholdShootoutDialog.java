@@ -51,6 +51,7 @@ import javax.swing.event.ChangeEvent;
 import javax.swing.event.ChangeListener;
 import javax.swing.event.ListSelectionEvent;
 import javax.swing.event.ListSelectionListener;
+import javax.swing.filechooser.FileFilter;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import javax.swing.table.AbstractTableModel;
 import javax.swing.table.DefaultTableCellRenderer;
@@ -59,6 +60,7 @@ import javax.swing.table.TableCellRenderer;
 import javax.swing.table.TableColumnModel;
 import javax.swing.table.TableRowSorter;
 import java.awt.BorderLayout;
+import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dialog;
 import java.awt.Dimension;
@@ -77,6 +79,7 @@ import java.awt.event.WindowEvent;
 import java.awt.datatransfer.StringSelection;
 import java.awt.image.BufferedImage;
 import java.io.File;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
@@ -136,7 +139,7 @@ public final class ThresholdShootoutDialog {
     private final JTextField maxSize = new JTextField("Infinity", 8);
     private final JCheckBox brightObjects = new JCheckBox("Bright objects on dark background", true);
     private final JLabel rangeLabel = new JLabel("Macro output range: not run yet.");
-    private final JLabel statusLabel = new JLabel(" ");
+    private final StatusLabel statusLabel = new StatusLabel(" ");
     private final JProgressBar progressBar = new JProgressBar(0, 100);
     private final ChartPanel chartPanel = new ChartPanel();
     private final ResultTableModel tableModel = new ResultTableModel();
@@ -146,6 +149,7 @@ public final class ThresholdShootoutDialog {
     private final JButton clickFitButton = new JButton("Click good objects...");
     private final JButton scrubButton = new JButton("Scrub...");
     private final JButton applyToMacroButton = new JButton("Apply to macro");
+    private final JButton loadSidecarButton = new JButton("Load sidecar...");
     private final JButton copyMethodsButton = new JButton("Copy methods paragraph");
     private final JButton consensusButton = new JButton("Show consensus mask");
     private final JButton exportButton = new JButton("Export CSV...");
@@ -168,17 +172,17 @@ public final class ThresholdShootoutDialog {
     private SwingWorker<ShootoutResult, Void> pinWorker;
     private SwingWorker<BatchRunResult, Void> batchWorker;
     private SwingWorker<GroundTruthReference, Void> referenceWorker;
+    private SwingWorker<LoadedSidecar, Void> sidecarLoadWorker;
     private SwingWorker<File, Void> sidecarWorker;
     private volatile boolean batchCancelRequested;
     private boolean closed;
     private String agreementStatusMessage;
     private File exportedCsvFile;
     private File sidecarFile;
-    // TODO: Replay from .testcounts.json in a later stage.
     private File groundTruthFile;
     private File referenceFileInFlight;
 
-    private ThresholdShootoutDialog(
+    ThresholdShootoutDialog(
             Window owner,
             ImagePlus source,
             String macro,
@@ -333,6 +337,7 @@ public final class ThresholdShootoutDialog {
             left.add(scrubButton);
         }
         left.add(applyToMacroButton);
+        left.add(loadSidecarButton);
         left.add(copyMethodsButton);
         left.add(consensusButton);
         left.add(exportButton);
@@ -366,6 +371,11 @@ public final class ThresholdShootoutDialog {
         applyToMacroButton.addActionListener(new ActionListener() {
             @Override public void actionPerformed(ActionEvent e) {
                 applySelectedToMacro();
+            }
+        });
+        loadSidecarButton.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                loadSidecarFromFile();
             }
         });
         copyMethodsButton.addActionListener(new ActionListener() {
@@ -439,6 +449,9 @@ public final class ThresholdShootoutDialog {
                 activeSettings = null;
                 if (sidecarWorker != null && !sidecarWorker.isDone()) {
                     sidecarWorker.cancel(true);
+                }
+                if (sidecarLoadWorker != null && !sidecarLoadWorker.isDone()) {
+                    sidecarLoadWorker.cancel(true);
                 }
             }
         });
@@ -925,6 +938,169 @@ public final class ThresholdShootoutDialog {
         }
     }
 
+    private void loadSidecarFromFile() {
+        if (isBusy()) return;
+        JFileChooser chooser = new JFileChooser();
+        chooser.setDialogTitle("Load Sidecar");
+        chooser.setFileFilter(new FileFilter() {
+            @Override public boolean accept(File file) {
+                return file != null
+                        && (file.isDirectory()
+                        || file.getName().toLowerCase(Locale.ROOT).endsWith(".testcounts.json"));
+            }
+
+            @Override public String getDescription() {
+                return "Test Counts sidecar (*.testcounts.json)";
+            }
+        });
+        File imageFile = sourceImageFile(source);
+        if (imageFile != null && imageFile.getParentFile() != null) {
+            chooser.setCurrentDirectory(imageFile.getParentFile());
+        }
+        if (sidecarFile != null) {
+            chooser.setSelectedFile(sidecarFile);
+        }
+        if (chooser.showOpenDialog(dialog) != JFileChooser.APPROVE_OPTION) {
+            return;
+        }
+        loadSidecarFile(chooser.getSelectedFile());
+    }
+
+    void loadSidecarFile(final File file) {
+        if (file == null || isBusy()) return;
+        statusLabel.setText("Loading sidecar...");
+        setProgressIndeterminate("Loading sidecar...");
+        sidecarLoadWorker = new SwingWorker<LoadedSidecar, Void>() {
+            @Override protected LoadedSidecar doInBackground() throws Exception {
+                TestCountsManifest manifest = TestCountsManifest.read(file);
+                GroundTruthLoad groundTruth = loadGroundTruthFromManifest(manifest);
+                return new LoadedSidecar(
+                        file,
+                        manifest,
+                        groundTruth.reference,
+                        groundTruth.file,
+                        groundTruth.warning);
+            }
+
+            @Override protected void done() {
+                onSidecarLoaded(this);
+            }
+        };
+        updateControlState();
+        sidecarLoadWorker.execute();
+    }
+
+    private void onSidecarLoaded(SwingWorker<LoadedSidecar, Void> finishedWorker) {
+        try {
+            applyLoadedSidecar(finishedWorker.get());
+            setProgressValue(100, "Sidecar loaded.");
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            statusLabel.setText("Sidecar load interrupted.");
+            setProgressValue(0, "Interrupted.");
+        } catch (ExecutionException ex) {
+            statusLabel.setText("Sidecar load failed.");
+            setProgressValue(0, "Failed.");
+            IJ.showMessage("Test Counts", "Could not load sidecar:\n" + cleanMessage(ex.getCause()));
+        } catch (RuntimeException ex) {
+            if (!closed && dialog.isDisplayable()) {
+                statusLabel.setText("Sidecar load failed.");
+                setProgressValue(0, "Failed.");
+                IJ.showMessage("Test Counts", "Could not load sidecar:\n" + cleanMessage(ex));
+            }
+        } finally {
+            if (finishedWorker == sidecarLoadWorker) {
+                sidecarLoadWorker = null;
+            }
+            updateControlState();
+        }
+    }
+
+    void applySidecarManifest(
+            TestCountsManifest manifest,
+            GroundTruthReference loadedGroundTruth,
+            File loadedGroundTruthFile,
+            File loadedSidecarFile,
+            String groundTruthWarning) {
+        applyLoadedSidecar(new LoadedSidecar(
+                loadedSidecarFile,
+                manifest,
+                loadedGroundTruth,
+                loadedGroundTruthFile,
+                groundTruthWarning));
+    }
+
+    private void applyLoadedSidecar(LoadedSidecar loaded) {
+        if (loaded == null || loaded.manifest == null) {
+            return;
+        }
+        sidecarFile = loaded.file;
+        closeScrubPane();
+        closeImageQuietly(activeMaskPreview);
+        activeMaskPreview = null;
+        closeImageQuietly(activeConsensusPreview);
+        activeConsensusPreview = null;
+        closeImageQuietly(activeConsensusMask);
+        activeConsensusMask = null;
+        closeResultImages(results);
+        closeShootoutRun(activeShootoutRun);
+        activeShootoutRun = null;
+        activeConsensusMask = null;
+        agreementStatusMessage = null;
+
+        ShootoutSettings settings = shootoutSettingsFromManifest(
+                loaded.manifest.settings,
+                loaded.groundTruthReference);
+        applyShootoutSettings(settings);
+        groundTruthReference = loaded.groundTruthReference;
+        groundTruthFile = loaded.groundTruthFile;
+        referenceLabel.setText(groundTruthReference == null || groundTruthReference.isEmpty()
+                ? "no reference"
+                : groundTruthReference.size() + " objects loaded");
+
+        results = shootoutResultsFromManifest(loaded.manifest.results);
+        setTableResults(results, groundTruthReference != null);
+        updateRangeLabel(results);
+        chartPanel.hideForRun();
+        table.clearSelection();
+        if (loaded.manifest.chosenVariant != null) {
+            selectVariant(loaded.manifest.chosenVariant.variant);
+        }
+
+        List<String> warnings = new ArrayList<String>();
+        if (!imageSourceMatches(loaded.manifest.imageSource)) {
+            warnings.add("Sidecar was recorded against "
+                    + sourceRefTitle(loaded.manifest.imageSource)
+                    + "; current image is " + sourceTitle()
+                    + ". Settings applied; results need a re-run.");
+        }
+        if (loaded.groundTruthWarning != null && !loaded.groundTruthWarning.trim().isEmpty()) {
+            warnings.add(loaded.groundTruthWarning);
+        }
+        if (warnings.isEmpty()) {
+            String name = loaded.file == null ? "sidecar" : loaded.file.getName();
+            statusLabel.setText("Loaded " + name + ". Settings applied.");
+        } else {
+            showWarningStatus(warnings);
+        }
+        updateControlState();
+    }
+
+    private void applyShootoutSettings(ShootoutSettings settings) {
+        ShootoutSettings safe = settings == null ? ShootoutSettings.defaults() : settings;
+        countingMode.setSelectedItem(countModeLabel(safe.countingMode));
+        thresholdMode.setSelectedItem(thresholdModeLabel(safe.thresholdMode));
+        autoMethods.setText(join(safe.autoMethods));
+        fixedThresholds.setText(joinNumbers(safe.fixedThresholds));
+        gridSteps.setValue(Integer.valueOf(safe.gridSteps));
+        minSize.setText(formatNumber(safe.minSize));
+        maxSize.setText(formatNumber(safe.maxSize));
+        brightObjects.setSelected(safe.darkBackground);
+        runFragilityChecks.setSelected(safe.runFragilityChecks);
+        activeSettings = safe;
+        notifySettings(safe);
+    }
+
     private void offerRoiManagerReference() {
         if (GraphicsEnvironment.isHeadless() || groundTruthReference != null) {
             return;
@@ -966,6 +1142,205 @@ public final class ThresholdShootoutDialog {
         }
         setTableResults(results, groundTruthReference != null);
         updateControlState();
+    }
+
+    private GroundTruthLoad loadGroundTruthFromManifest(TestCountsManifest manifest) {
+        File file = groundTruthFileFromManifest(manifest == null ? null : manifest.groundTruth);
+        if (file == null) {
+            return GroundTruthLoad.empty();
+        }
+        String path = file.getAbsolutePath();
+        if (!file.isFile()) {
+            return GroundTruthLoad.warning("Ground-truth file not found at "
+                    + path + ". Load it manually before scoring.");
+        }
+        try {
+            return new GroundTruthLoad(GroundTruthLoader.load(file), file, null);
+        } catch (RuntimeException ex) {
+            return GroundTruthLoad.warning("Ground-truth file could not be loaded at "
+                    + path + ": " + cleanMessage(ex)
+                    + ". Load it manually before scoring.");
+        }
+    }
+
+    private static File groundTruthFileFromManifest(TestCountsManifest.SourceRef ref) {
+        if (ref == null || ref.inMemory || ref.path == null || ref.path.trim().isEmpty()) {
+            return null;
+        }
+        return new File(ref.path);
+    }
+
+    private ShootoutSettings shootoutSettingsFromManifest(
+            TestCountsManifest.SettingsSnapshot snapshot,
+            GroundTruthReference reference) {
+        TestCountsManifest.SettingsSnapshot safe = snapshot == null
+                ? TestCountsManifest.SettingsSnapshot.from(ShootoutSettings.defaults())
+                : snapshot;
+        return new ShootoutSettings(
+                ShootoutSettings.CountingMode.valueOf(safe.countingMode),
+                ShootoutSettings.ThresholdMode.valueOf(safe.thresholdMode),
+                safe.autoMethods,
+                safe.fixedThresholds,
+                safe.gridSteps,
+                safe.minSize,
+                safe.maxSize,
+                safe.darkBackground,
+                safe.channelsToSweep,
+                reference,
+                safe.runFragilityChecks,
+                safe.clickPoints);
+    }
+
+    private static List<ShootoutResult> shootoutResultsFromManifest(
+            List<TestCountsManifest.ResultSnapshot> snapshots) {
+        if (snapshots == null || snapshots.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<ShootoutResult> rows = new ArrayList<ShootoutResult>(snapshots.size());
+        for (TestCountsManifest.ResultSnapshot snapshot : snapshots) {
+            if (snapshot != null) {
+                rows.add(shootoutResultFromManifest(snapshot));
+            }
+        }
+        return rows;
+    }
+
+    private static ShootoutResult shootoutResultFromManifest(TestCountsManifest.ResultSnapshot snapshot) {
+        ShootoutSettings.CountingMode countingMode =
+                ShootoutSettings.CountingMode.valueOf(snapshot.countingMode);
+        ShootoutResult.Source source = ShootoutResult.Source.valueOf(snapshot.source);
+        double imageMinimum = snapshot.imageMinimum == null
+                ? Double.NaN
+                : snapshot.imageMinimum.doubleValue();
+        double imageMaximum = snapshot.imageMaximum == null
+                ? Double.NaN
+                : snapshot.imageMaximum.doubleValue();
+        ShootoutResult row;
+        if (ShootoutResult.Status.FAILED.name().equals(snapshot.status)) {
+            row = ShootoutResult.failure(
+                    source,
+                    countingMode,
+                    snapshot.variant,
+                    snapshot.thresholdValue,
+                    imageMinimum,
+                    imageMaximum,
+                    cleanMessage(snapshot.error));
+        } else {
+            row = ShootoutResult.success(
+                    source,
+                    countingMode,
+                    snapshot.variant,
+                    snapshot.thresholdValue,
+                    imageMinimum,
+                    imageMaximum,
+                    null,
+                    countSummaryFromManifest(snapshot));
+        }
+        if (snapshot.separation != null || snapshot.distinctness != null) {
+            row = row.withQualityScores(
+                    snapshot.separation == null ? Double.NaN : snapshot.separation.doubleValue(),
+                    snapshot.distinctness == null ? Double.NaN : snapshot.distinctness.doubleValue());
+        }
+        if (snapshot.fragility != null) {
+            row = row.withFragility(snapshot.fragility.doubleValue(), fragilityRangeFromManifest(snapshot));
+        }
+        if (snapshot.agreement != null) {
+            row = row.withAgreement(snapshot.agreement.doubleValue());
+        }
+        if (snapshot.recommended) {
+            row = row.withRecommendation(cleanMessage(
+                    snapshot.recommendationReason == null
+                            ? "Recommended in loaded sidecar."
+                            : snapshot.recommendationReason));
+        }
+        return row;
+    }
+
+    private static ObjectCounter.CountSummary countSummaryFromManifest(
+            TestCountsManifest.ResultSnapshot snapshot) {
+        int count = snapshot.count == null ? 0 : snapshot.count.intValue();
+        double meanSize = snapshot.meanSize == null ? 0.0 : snapshot.meanSize.doubleValue();
+        double coverage = snapshot.coverage == null ? 0.0 : snapshot.coverage.doubleValue();
+        return new ObjectCounter.CountSummary(count, meanSize, meanSize * count, coverage);
+    }
+
+    private static int[] fragilityRangeFromManifest(TestCountsManifest.ResultSnapshot snapshot) {
+        if (snapshot.fragilityRangeMin == null || snapshot.fragilityRangeMax == null) {
+            return null;
+        }
+        return new int[]{
+                snapshot.fragilityRangeMin.intValue(),
+                snapshot.fragilityRangeMax.intValue()};
+    }
+
+    private void selectVariant(String variant) {
+        if (variant == null) {
+            return;
+        }
+        for (int i = 0; i < results.size(); i++) {
+            ShootoutResult row = results.get(i);
+            if (row != null && variant.equals(row.variant)) {
+                selectModelRow(i);
+                return;
+            }
+        }
+    }
+
+    private boolean imageSourceMatches(TestCountsManifest.SourceRef recorded) {
+        if (recorded == null) {
+            return true;
+        }
+        File currentFile = sourceImageFile(source);
+        if (!recorded.inMemory && currentFile != null && pathsMatch(recorded.path, currentFile)) {
+            return true;
+        }
+        return sourceRefTitle(recorded).equals(sourceTitle());
+    }
+
+    private static boolean pathsMatch(String recordedPath, File currentFile) {
+        if (recordedPath == null || recordedPath.trim().isEmpty() || currentFile == null) {
+            return false;
+        }
+        try {
+            return new File(recordedPath).getCanonicalFile().equals(currentFile.getCanonicalFile());
+        } catch (IOException ex) {
+            return new File(recordedPath).getAbsolutePath().equals(currentFile.getAbsolutePath());
+        }
+    }
+
+    private static String sourceRefTitle(TestCountsManifest.SourceRef ref) {
+        if (ref == null || ref.path == null || ref.path.trim().isEmpty()) {
+            return "unknown";
+        }
+        if (ref.inMemory && ref.path.startsWith("in-memory:")) {
+            return cleanMessage(ref.path.substring("in-memory:".length()));
+        }
+        if (!ref.inMemory) {
+            String name = new File(ref.path).getName();
+            if (name != null && !name.trim().isEmpty()) {
+                return name;
+            }
+        }
+        return cleanMessage(ref.path);
+    }
+
+    private void showWarningStatus(List<String> warnings) {
+        if (warnings == null || warnings.isEmpty()) {
+            return;
+        }
+        if (warnings.size() == 1) {
+            statusLabel.setWarningText(warnings.get(0));
+            return;
+        }
+        StringBuilder html = new StringBuilder("<html>");
+        for (int i = 0; i < warnings.size(); i++) {
+            if (i > 0) {
+                html.append("<br>");
+            }
+            html.append(escapeHtml(warnings.get(i)));
+        }
+        html.append("</html>");
+        statusLabel.setWarningText(html.toString());
     }
 
     private void openMaskPreview() {
@@ -2062,6 +2437,7 @@ public final class ThresholdShootoutDialog {
         showQualityColumns.setEnabled(!busy);
         runFragilityChecks.setEnabled(!busy);
         loadReferenceButton.setEnabled(!busy);
+        loadSidecarButton.setEnabled(!busy);
         clearReferenceButton.setEnabled(!busy && groundTruthReference != null);
         accessiblePalette.setEnabled(!busy && groundTruthReference != null);
         runButton.setEnabled(!busy);
@@ -2097,7 +2473,8 @@ public final class ThresholdShootoutDialog {
                 || isClickCaptureActive()
                 || isPinBusy()
                 || isBatchBusy()
-                || isReferenceBusy();
+                || isReferenceBusy()
+                || isSidecarLoadBusy();
     }
 
     private boolean isShootoutBusy() {
@@ -2122,6 +2499,10 @@ public final class ThresholdShootoutDialog {
 
     private boolean isReferenceBusy() {
         return referenceWorker != null && !referenceWorker.isDone();
+    }
+
+    private boolean isSidecarLoadBusy() {
+        return sidecarLoadWorker != null && !sidecarLoadWorker.isDone();
     }
 
     private static boolean usesAuto(ShootoutSettings.ThresholdMode mode) {
@@ -2191,6 +2572,18 @@ public final class ThresholdShootoutDialog {
         return sb.toString();
     }
 
+    private static String joinNumbers(List<Double> values) {
+        if (values == null || values.isEmpty()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < values.size(); i++) {
+            if (i > 0) sb.append(',');
+            sb.append(formatNumber(values.get(i).doubleValue()));
+        }
+        return sb.toString();
+    }
+
     private static int firstChannel(List<Integer> channels) {
         if (channels == null || channels.isEmpty() || channels.get(0) == null) {
             return 1;
@@ -2200,6 +2593,19 @@ public final class ThresholdShootoutDialog {
 
     private static String countModeLabel(ShootoutSettings.CountingMode mode) {
         return mode == ShootoutSettings.CountingMode.OBJECTS_3D ? COUNT_3D : COUNT_2D;
+    }
+
+    private static String thresholdModeLabel(ShootoutSettings.ThresholdMode mode) {
+        if (mode == ShootoutSettings.ThresholdMode.FIXED_VALUES) {
+            return MODE_FIXED;
+        }
+        if (mode == ShootoutSettings.ThresholdMode.AUTO_AND_FIXED) {
+            return MODE_AUTO_AND_FIXED;
+        }
+        if (mode == ShootoutSettings.ThresholdMode.AUTO_GRID) {
+            return MODE_AUTO_GRID;
+        }
+        return MODE_AUTO;
     }
 
     private static String rangeText(ShootoutResult row) {
@@ -2268,6 +2674,78 @@ public final class ThresholdShootoutDialog {
 
     public interface MacroEditHandler {
         void macroEdited(String newIjm, DagIR newDag);
+    }
+
+    private static final class LoadedSidecar {
+        final File file;
+        final TestCountsManifest manifest;
+        final GroundTruthReference groundTruthReference;
+        final File groundTruthFile;
+        final String groundTruthWarning;
+
+        LoadedSidecar(
+                File file,
+                TestCountsManifest manifest,
+                GroundTruthReference groundTruthReference,
+                File groundTruthFile,
+                String groundTruthWarning) {
+            this.file = file;
+            this.manifest = manifest;
+            this.groundTruthReference = groundTruthReference == null || groundTruthReference.isEmpty()
+                    ? null
+                    : groundTruthReference;
+            this.groundTruthFile = this.groundTruthReference == null ? null : groundTruthFile;
+            this.groundTruthWarning = groundTruthWarning;
+        }
+    }
+
+    private static final class GroundTruthLoad {
+        final GroundTruthReference reference;
+        final File file;
+        final String warning;
+
+        GroundTruthLoad(GroundTruthReference reference, File file, String warning) {
+            this.reference = reference == null || reference.isEmpty() ? null : reference;
+            this.file = this.reference == null ? null : file;
+            this.warning = warning;
+        }
+
+        static GroundTruthLoad empty() {
+            return new GroundTruthLoad(null, null, null);
+        }
+
+        static GroundTruthLoad warning(String warning) {
+            return new GroundTruthLoad(null, null, warning);
+        }
+    }
+
+    private static final class StatusLabel extends JLabel {
+        private boolean warning;
+
+        StatusLabel(String text) {
+            super(text);
+        }
+
+        @Override public void setText(String text) {
+            clearWarning();
+            super.setText(text);
+        }
+
+        void setWarningText(String text) {
+            super.setText(text);
+            warning = true;
+            setOpaque(true);
+            setBackground(new Color(255, 248, 190));
+        }
+
+        private void clearWarning() {
+            if (!warning) {
+                return;
+            }
+            warning = false;
+            setOpaque(false);
+            setBackground(null);
+        }
     }
 
     private static final class BatchRunResult {

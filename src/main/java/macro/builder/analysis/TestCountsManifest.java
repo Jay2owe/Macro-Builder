@@ -6,14 +6,17 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 public final class TestCountsManifest {
     public static final int SCHEMA_VERSION = 1;
@@ -31,7 +34,7 @@ public final class TestCountsManifest {
     public final ClickFitSnapshot clickFit;
 
     private TestCountsManifest(Builder builder) {
-        this.schemaVersion = SCHEMA_VERSION;
+        this.schemaVersion = builder.schemaVersion;
         this.pluginVersion = clean(builder.pluginVersion, "dev");
         this.fijiVersion = clean(builder.fijiVersion, "headless");
         this.timestamp = clean(builder.timestamp, DateTimeFormatter.ISO_INSTANT.format(Instant.now()));
@@ -54,6 +57,52 @@ public final class TestCountsManifest {
 
     public static Builder builder() {
         return new Builder();
+    }
+
+    public static TestCountsManifest read(File file) throws IOException {
+        if (file == null) {
+            throw new IOException("Sidecar file is required.");
+        }
+        String path = file.getAbsolutePath();
+        String json;
+        try {
+            json = new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8);
+        } catch (IOException ex) {
+            throw new IOException("Could not read sidecar " + path + ": " + cleanMessage(ex), ex);
+        }
+        try {
+            return parse(json);
+        } catch (IOException ex) {
+            throw ex;
+        } catch (RuntimeException ex) {
+            throw new IOException("Malformed JSON in sidecar " + path + ": " + cleanMessage(ex), ex);
+        }
+    }
+
+    static TestCountsManifest parse(String json) throws IOException {
+        Object root = new JsonParser(json).parse();
+        Map<String, Object> obj = asObject(root, "root");
+        int schemaVersion = intField(obj, "schemaVersion", SCHEMA_VERSION);
+        if (schemaVersion > SCHEMA_VERSION) {
+            throw new IOException("Sidecar schema version " + schemaVersion
+                    + " is newer than this plugin's version " + SCHEMA_VERSION
+                    + ". Update the plugin and try again.");
+        }
+
+        return builder()
+                .schemaVersion(schemaVersion)
+                .pluginVersion(stringField(obj, "pluginVersion", "dev"))
+                .fijiVersion(stringField(obj, "fijiVersion", "headless"))
+                .timestamp(stringField(obj, "timestamp",
+                        DateTimeFormatter.ISO_INSTANT.format(Instant.now())))
+                .imageSource(sourceRefField(obj, "imageSource", SourceRef.inMemory("unknown")))
+                .macroSource(hashRefField(obj, "macroSource", HashRef.of(sha256(""))))
+                .settings(settingsField(obj, "settings"))
+                .resultSnapshots(resultSnapshotsField(obj, "results"))
+                .chosenVariant(resultSnapshotField(obj, "chosenVariant", null))
+                .groundTruth(sourceRefField(obj, "groundTruth", null))
+                .clickFit(clickFitField(obj, "clickFit"))
+                .build();
     }
 
     public String toJson() {
@@ -401,6 +450,7 @@ public final class TestCountsManifest {
     }
 
     public static final class Builder {
+        private int schemaVersion = SCHEMA_VERSION;
         private String pluginVersion = "dev";
         private String fijiVersion = detectFijiVersion();
         private String timestamp = DateTimeFormatter.ISO_INSTANT.format(Instant.now());
@@ -411,6 +461,11 @@ public final class TestCountsManifest {
         private ResultSnapshot chosenVariant;
         private SourceRef groundTruth;
         private ClickFitSnapshot clickFit;
+
+        public Builder schemaVersion(int schemaVersion) {
+            this.schemaVersion = schemaVersion < 0 ? SCHEMA_VERSION : schemaVersion;
+            return this;
+        }
 
         public Builder pluginVersion(String pluginVersion) {
             this.pluginVersion = pluginVersion;
@@ -583,6 +638,37 @@ public final class TestCountsManifest {
             }
         }
 
+        private SettingsSnapshot(
+                String countingMode,
+                String thresholdMode,
+                List<String> autoMethods,
+                List<Double> fixedThresholds,
+                int gridSteps,
+                double minSize,
+                double maxSize,
+                boolean darkBackground,
+                List<Integer> channelsToSweep,
+                boolean runFragilityChecks,
+                List<int[]> clickPoints,
+                Integer groundTruthObjectCount,
+                String groundTruthSourceFormat,
+                String groundTruthSourceName) {
+            this.countingMode = countingMode;
+            this.thresholdMode = thresholdMode;
+            this.autoMethods = Collections.unmodifiableList(new ArrayList<String>(autoMethods));
+            this.fixedThresholds = Collections.unmodifiableList(new ArrayList<Double>(fixedThresholds));
+            this.gridSteps = gridSteps;
+            this.minSize = minSize;
+            this.maxSize = maxSize;
+            this.darkBackground = darkBackground;
+            this.channelsToSweep = Collections.unmodifiableList(new ArrayList<Integer>(channelsToSweep));
+            this.runFragilityChecks = runFragilityChecks;
+            this.clickPoints = immutablePointCopy(clickPoints);
+            this.groundTruthObjectCount = groundTruthObjectCount;
+            this.groundTruthSourceFormat = groundTruthSourceFormat;
+            this.groundTruthSourceName = groundTruthSourceName;
+        }
+
         public static SettingsSnapshot from(ShootoutSettings settings) {
             return new SettingsSnapshot(settings);
         }
@@ -703,6 +789,55 @@ public final class TestCountsManifest {
             this.agreement = finiteOrNull(row.agreementScore);
         }
 
+        private ResultSnapshot(
+                String variant,
+                String source,
+                String countingMode,
+                String thresholdLabel,
+                Double thresholdValue,
+                Double imageMinimum,
+                Double imageMaximum,
+                String status,
+                String error,
+                boolean recommended,
+                String recommendationReason,
+                Integer count,
+                Double meanSize,
+                Double coverage,
+                Double precision,
+                Double recall,
+                Double f1,
+                Double separation,
+                Double distinctness,
+                Double fragility,
+                Integer fragilityRangeMin,
+                Integer fragilityRangeMax,
+                Double agreement) {
+            this.variant = variant;
+            this.source = source;
+            this.countingMode = countingMode;
+            this.thresholdLabel = thresholdLabel;
+            this.thresholdValue = thresholdValue;
+            this.imageMinimum = imageMinimum;
+            this.imageMaximum = imageMaximum;
+            this.status = status;
+            this.error = error;
+            this.recommended = recommended;
+            this.recommendationReason = recommendationReason;
+            this.count = count;
+            this.meanSize = meanSize;
+            this.coverage = coverage;
+            this.precision = precision;
+            this.recall = recall;
+            this.f1 = f1;
+            this.separation = separation;
+            this.distinctness = distinctness;
+            this.fragility = fragility;
+            this.fragilityRangeMin = fragilityRangeMin;
+            this.fragilityRangeMax = fragilityRangeMax;
+            this.agreement = agreement;
+        }
+
         public static ResultSnapshot from(ShootoutResult row) {
             if (row == null) {
                 throw new IllegalArgumentException("row must not be null");
@@ -712,6 +847,567 @@ public final class TestCountsManifest {
 
         private static Double finiteOrNull(double value) {
             return isFinite(value) ? Double.valueOf(value) : null;
+        }
+    }
+
+    private static SettingsSnapshot settingsField(Map<String, Object> obj, String key) {
+        ShootoutSettings defaults = ShootoutSettings.defaults();
+        if (!obj.containsKey(key) || obj.get(key) == null) {
+            return SettingsSnapshot.from(defaults);
+        }
+        Map<String, Object> settings = asObject(obj.get(key), key);
+        String countingMode = enumName(
+                stringField(settings, "countingMode", defaults.countingMode.name()),
+                ShootoutSettings.CountingMode.class,
+                "settings.countingMode");
+        String thresholdMode = enumName(
+                stringField(settings, "thresholdMode", defaults.thresholdMode.name()),
+                ShootoutSettings.ThresholdMode.class,
+                "settings.thresholdMode");
+        List<String> autoMethods = stringArrayField(settings, "autoMethods", defaults.autoMethods);
+        List<Double> fixedThresholds = doubleArrayField(
+                settings,
+                "fixedThresholds",
+                defaults.fixedThresholds);
+        int gridSteps = intField(settings, "gridSteps", defaults.gridSteps);
+        double minSize = doubleField(settings, "minSize", defaults.minSize);
+        double maxSize = doubleField(settings, "maxSize", defaults.maxSize);
+        boolean darkBackground = booleanField(settings, "darkBackground", defaults.darkBackground);
+        List<Integer> channelsToSweep = intArrayField(
+                settings,
+                "channelsToSweep",
+                defaults.channelsToSweep);
+        boolean runFragilityChecks = booleanField(
+                settings,
+                "runFragilityChecks",
+                defaults.runFragilityChecks);
+        List<int[]> clickPoints = pointArrayField(settings, "clickPoints", defaults.clickPoints);
+        Integer groundTruthObjectCount = integerObjectField(settings, "groundTruthObjectCount");
+        String groundTruthSourceFormat = stringObjectField(settings, "groundTruthSourceFormat");
+        if (groundTruthSourceFormat != null) {
+            groundTruthSourceFormat = enumName(
+                    groundTruthSourceFormat,
+                    GroundTruthReference.SourceFormat.class,
+                    "settings.groundTruthSourceFormat");
+        }
+        String groundTruthSourceName = stringObjectField(settings, "groundTruthSourceName");
+
+        ShootoutSettings checked = new ShootoutSettings(
+                ShootoutSettings.CountingMode.valueOf(countingMode),
+                ShootoutSettings.ThresholdMode.valueOf(thresholdMode),
+                autoMethods,
+                fixedThresholds,
+                gridSteps,
+                minSize,
+                maxSize,
+                darkBackground,
+                channelsToSweep,
+                null,
+                runFragilityChecks,
+                clickPoints);
+        return new SettingsSnapshot(
+                checked.countingMode.name(),
+                checked.thresholdMode.name(),
+                checked.autoMethods,
+                checked.fixedThresholds,
+                checked.gridSteps,
+                checked.minSize,
+                checked.maxSize,
+                checked.darkBackground,
+                checked.channelsToSweep,
+                checked.runFragilityChecks,
+                checked.clickPoints,
+                groundTruthObjectCount,
+                groundTruthSourceFormat,
+                groundTruthSourceName);
+    }
+
+    private static List<ResultSnapshot> resultSnapshotsField(Map<String, Object> obj, String key) {
+        if (!obj.containsKey(key) || obj.get(key) == null) {
+            return Collections.emptyList();
+        }
+        List<Object> rawRows = asArray(obj.get(key), key);
+        List<ResultSnapshot> rows = new ArrayList<ResultSnapshot>(rawRows.size());
+        for (int i = 0; i < rawRows.size(); i++) {
+            rows.add(resultSnapshot(rawRows.get(i), key + "[" + i + "]"));
+        }
+        return rows;
+    }
+
+    private static ResultSnapshot resultSnapshotField(
+            Map<String, Object> obj,
+            String key,
+            ResultSnapshot defaultValue) {
+        if (!obj.containsKey(key) || obj.get(key) == null) {
+            return defaultValue;
+        }
+        return resultSnapshot(obj.get(key), key);
+    }
+
+    private static ResultSnapshot resultSnapshot(Object value, String label) {
+        Map<String, Object> row = asObject(value, label);
+        String variant = clean(stringField(row, "variant", "unnamed"), "unnamed");
+        String source = enumName(
+                stringField(row, "source", ShootoutResult.Source.AUTO.name()),
+                ShootoutResult.Source.class,
+                label + ".source");
+        String countingMode = enumName(
+                stringField(row, "countingMode", ShootoutSettings.CountingMode.PARTICLES_2D.name()),
+                ShootoutSettings.CountingMode.class,
+                label + ".countingMode");
+        String status = enumName(
+                stringField(row, "status", ShootoutResult.Status.SUCCESS.name()),
+                ShootoutResult.Status.class,
+                label + ".status");
+        return new ResultSnapshot(
+                variant,
+                source,
+                countingMode,
+                stringField(row, "thresholdLabel", variant),
+                doubleObjectField(row, "thresholdValue"),
+                doubleObjectField(row, "imageMinimum"),
+                doubleObjectField(row, "imageMaximum"),
+                status,
+                stringObjectField(row, "error"),
+                booleanField(row, "recommended", false),
+                stringObjectField(row, "recommendationReason"),
+                integerObjectField(row, "count"),
+                doubleObjectField(row, "meanSize"),
+                doubleObjectField(row, "coverage"),
+                doubleObjectField(row, "precision"),
+                doubleObjectField(row, "recall"),
+                doubleObjectField(row, "f1"),
+                doubleObjectField(row, "separation"),
+                doubleObjectField(row, "distinctness"),
+                doubleObjectField(row, "fragility"),
+                integerObjectField(row, "fragilityRangeMin"),
+                integerObjectField(row, "fragilityRangeMax"),
+                doubleObjectField(row, "agreement"));
+    }
+
+    private static SourceRef sourceRefField(Map<String, Object> obj, String key, SourceRef defaultValue) {
+        if (!obj.containsKey(key) || obj.get(key) == null) {
+            return defaultValue;
+        }
+        Object value = obj.get(key);
+        if (value instanceof String) {
+            String path = (String) value;
+            if (path.startsWith("in-memory:")) {
+                return new SourceRef(path, "", true);
+            }
+            return SourceRef.file(path, "");
+        }
+        Map<String, Object> ref = asObject(value, key);
+        return SourceRef.file(
+                stringField(ref, "path", ""),
+                stringField(ref, "sha256", ""));
+    }
+
+    private static HashRef hashRefField(Map<String, Object> obj, String key, HashRef defaultValue) {
+        if (!obj.containsKey(key) || obj.get(key) == null) {
+            return defaultValue;
+        }
+        Object value = obj.get(key);
+        if (value instanceof String) {
+            return HashRef.of((String) value);
+        }
+        Map<String, Object> ref = asObject(value, key);
+        return HashRef.of(stringField(ref, "sha256", ""));
+    }
+
+    private static ClickFitSnapshot clickFitField(Map<String, Object> obj, String key) {
+        if (!obj.containsKey(key) || obj.get(key) == null) {
+            return null;
+        }
+        Map<String, Object> clickFit = asObject(obj.get(key), key);
+        return new ClickFitSnapshot(
+                pointArrayField(clickFit, "points", Collections.<int[]>emptyList()),
+                doubleObjectField(clickFit, "thresholdValue"),
+                stringObjectField(clickFit, "variant"));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> asObject(Object value, String label) {
+        if (!(value instanceof Map)) {
+            throw new IllegalArgumentException(label + " must be an object");
+        }
+        return (Map<String, Object>) value;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Object> asArray(Object value, String label) {
+        if (!(value instanceof List)) {
+            throw new IllegalArgumentException(label + " must be an array");
+        }
+        return (List<Object>) value;
+    }
+
+    private static String stringField(Map<String, Object> obj, String key, String defaultValue) {
+        if (!obj.containsKey(key) || obj.get(key) == null) {
+            return defaultValue;
+        }
+        Object value = obj.get(key);
+        if (!(value instanceof String)) {
+            throw new IllegalArgumentException(key + " must be a string");
+        }
+        return (String) value;
+    }
+
+    private static String stringObjectField(Map<String, Object> obj, String key) {
+        if (!obj.containsKey(key) || obj.get(key) == null) {
+            return null;
+        }
+        return stringField(obj, key, null);
+    }
+
+    private static boolean booleanField(Map<String, Object> obj, String key, boolean defaultValue) {
+        if (!obj.containsKey(key) || obj.get(key) == null) {
+            return defaultValue;
+        }
+        Object value = obj.get(key);
+        if (!(value instanceof Boolean)) {
+            throw new IllegalArgumentException(key + " must be true or false");
+        }
+        return ((Boolean) value).booleanValue();
+    }
+
+    private static int intField(Map<String, Object> obj, String key, int defaultValue) {
+        if (!obj.containsKey(key) || obj.get(key) == null) {
+            return defaultValue;
+        }
+        return asInt(obj.get(key), key);
+    }
+
+    private static Integer integerObjectField(Map<String, Object> obj, String key) {
+        if (!obj.containsKey(key) || obj.get(key) == null) {
+            return null;
+        }
+        return Integer.valueOf(asInt(obj.get(key), key));
+    }
+
+    private static double doubleField(Map<String, Object> obj, String key, double defaultValue) {
+        if (!obj.containsKey(key) || obj.get(key) == null) {
+            return defaultValue;
+        }
+        return asDouble(obj.get(key), key);
+    }
+
+    private static Double doubleObjectField(Map<String, Object> obj, String key) {
+        if (!obj.containsKey(key) || obj.get(key) == null) {
+            return null;
+        }
+        return Double.valueOf(asDouble(obj.get(key), key));
+    }
+
+    private static List<String> stringArrayField(
+            Map<String, Object> obj,
+            String key,
+            List<String> defaultValue) {
+        if (!obj.containsKey(key) || obj.get(key) == null) {
+            return defaultValue;
+        }
+        List<Object> raw = asArray(obj.get(key), key);
+        List<String> values = new ArrayList<String>(raw.size());
+        for (int i = 0; i < raw.size(); i++) {
+            Object value = raw.get(i);
+            if (!(value instanceof String)) {
+                throw new IllegalArgumentException(key + "[" + i + "] must be a string");
+            }
+            values.add((String) value);
+        }
+        return values;
+    }
+
+    private static List<Double> doubleArrayField(
+            Map<String, Object> obj,
+            String key,
+            List<Double> defaultValue) {
+        if (!obj.containsKey(key) || obj.get(key) == null) {
+            return defaultValue;
+        }
+        List<Object> raw = asArray(obj.get(key), key);
+        List<Double> values = new ArrayList<Double>(raw.size());
+        for (int i = 0; i < raw.size(); i++) {
+            values.add(Double.valueOf(asDouble(raw.get(i), key + "[" + i + "]")));
+        }
+        return values;
+    }
+
+    private static List<Integer> intArrayField(
+            Map<String, Object> obj,
+            String key,
+            List<Integer> defaultValue) {
+        if (!obj.containsKey(key) || obj.get(key) == null) {
+            return defaultValue;
+        }
+        List<Object> raw = asArray(obj.get(key), key);
+        List<Integer> values = new ArrayList<Integer>(raw.size());
+        for (int i = 0; i < raw.size(); i++) {
+            values.add(Integer.valueOf(asInt(raw.get(i), key + "[" + i + "]")));
+        }
+        return values;
+    }
+
+    private static List<int[]> pointArrayField(
+            Map<String, Object> obj,
+            String key,
+            List<int[]> defaultValue) {
+        if (!obj.containsKey(key) || obj.get(key) == null) {
+            return defaultValue;
+        }
+        List<Object> raw = asArray(obj.get(key), key);
+        List<int[]> points = new ArrayList<int[]>(raw.size());
+        for (int i = 0; i < raw.size(); i++) {
+            List<Object> point = asArray(raw.get(i), key + "[" + i + "]");
+            if (point.size() < 2) {
+                throw new IllegalArgumentException(key + "[" + i + "] needs x and y");
+            }
+            int z = point.size() > 2 ? asInt(point.get(2), key + "[" + i + "][2]") : 1;
+            points.add(new int[]{
+                    asInt(point.get(0), key + "[" + i + "][0]"),
+                    asInt(point.get(1), key + "[" + i + "][1]"),
+                    Math.max(1, z)});
+        }
+        return points;
+    }
+
+    private static int asInt(Object value, String label) {
+        if (!(value instanceof Number)) {
+            throw new IllegalArgumentException(label + " must be a number");
+        }
+        Number number = (Number) value;
+        if (number instanceof Double || number instanceof Float) {
+            double d = number.doubleValue();
+            if (d != Math.rint(d)) {
+                throw new IllegalArgumentException(label + " must be an integer");
+            }
+        }
+        long longValue = number.longValue();
+        if (longValue < Integer.MIN_VALUE || longValue > Integer.MAX_VALUE) {
+            throw new IllegalArgumentException(label + " is out of range");
+        }
+        return (int) longValue;
+    }
+
+    private static double asDouble(Object value, String label) {
+        if (value instanceof Number) {
+            return ((Number) value).doubleValue();
+        }
+        if (value instanceof String) {
+            String text = ((String) value).trim();
+            if ("Infinity".equals(text)) {
+                return Double.POSITIVE_INFINITY;
+            }
+            if ("-Infinity".equals(text)) {
+                return Double.NEGATIVE_INFINITY;
+            }
+            if ("NaN".equals(text)) {
+                return Double.NaN;
+            }
+            try {
+                return Double.parseDouble(text);
+            } catch (NumberFormatException ex) {
+                throw new IllegalArgumentException(label + " must be a number");
+            }
+        }
+        throw new IllegalArgumentException(label + " must be a number");
+    }
+
+    private static <E extends Enum<E>> String enumName(String value, Class<E> type, String label) {
+        try {
+            return Enum.valueOf(type, value).name();
+        } catch (RuntimeException ex) {
+            throw new IllegalArgumentException(label + " has unsupported value: " + value);
+        }
+    }
+
+    private static String cleanMessage(Throwable ex) {
+        if (ex == null) {
+            return "Unknown error";
+        }
+        String message = ex.getMessage();
+        if (message == null || message.trim().isEmpty()) {
+            return ex.getClass().getSimpleName();
+        }
+        return message.trim().replace('\n', ' ').replace('\r', ' ');
+    }
+
+    private static final class JsonParser {
+        private final String text;
+        private int pos;
+
+        JsonParser(String text) {
+            this.text = text == null ? "" : text;
+        }
+
+        Object parse() {
+            Object value = parseValue();
+            skipWhitespace();
+            if (pos != text.length()) {
+                throw error("Unexpected trailing content");
+            }
+            return value;
+        }
+
+        private Object parseValue() {
+            skipWhitespace();
+            if (pos >= text.length()) {
+                throw error("Unexpected end of JSON");
+            }
+            char c = text.charAt(pos);
+            if (c == '{') return parseObject();
+            if (c == '[') return parseArray();
+            if (c == '"') return parseString();
+            if (c == '-' || (c >= '0' && c <= '9')) return parseNumber();
+            if (text.startsWith("true", pos)) {
+                pos += 4;
+                return Boolean.TRUE;
+            }
+            if (text.startsWith("false", pos)) {
+                pos += 5;
+                return Boolean.FALSE;
+            }
+            if (text.startsWith("null", pos)) {
+                pos += 4;
+                return null;
+            }
+            throw error("Unexpected token");
+        }
+
+        private Map<String, Object> parseObject() {
+            expect('{');
+            Map<String, Object> map = new LinkedHashMap<String, Object>();
+            skipWhitespace();
+            if (peek('}')) {
+                pos++;
+                return map;
+            }
+            while (true) {
+                skipWhitespace();
+                String key = parseString();
+                skipWhitespace();
+                expect(':');
+                map.put(key, parseValue());
+                skipWhitespace();
+                if (peek('}')) {
+                    pos++;
+                    return map;
+                }
+                expect(',');
+            }
+        }
+
+        private List<Object> parseArray() {
+            expect('[');
+            List<Object> list = new ArrayList<Object>();
+            skipWhitespace();
+            if (peek(']')) {
+                pos++;
+                return list;
+            }
+            while (true) {
+                list.add(parseValue());
+                skipWhitespace();
+                if (peek(']')) {
+                    pos++;
+                    return list;
+                }
+                expect(',');
+            }
+        }
+
+        private String parseString() {
+            expect('"');
+            StringBuilder sb = new StringBuilder();
+            while (pos < text.length()) {
+                char c = text.charAt(pos++);
+                if (c == '"') {
+                    return sb.toString();
+                }
+                if (c != '\\') {
+                    sb.append(c);
+                    continue;
+                }
+                if (pos >= text.length()) {
+                    throw error("Unterminated escape");
+                }
+                char escaped = text.charAt(pos++);
+                switch (escaped) {
+                    case '"': sb.append('"'); break;
+                    case '\\': sb.append('\\'); break;
+                    case '/': sb.append('/'); break;
+                    case 'b': sb.append('\b'); break;
+                    case 'f': sb.append('\f'); break;
+                    case 'n': sb.append('\n'); break;
+                    case 'r': sb.append('\r'); break;
+                    case 't': sb.append('\t'); break;
+                    case 'u':
+                        if (pos + 4 > text.length()) {
+                            throw error("Bad unicode escape");
+                        }
+                        String hex = text.substring(pos, pos + 4);
+                        try {
+                            sb.append((char) Integer.parseInt(hex, 16));
+                        } catch (NumberFormatException ex) {
+                            throw error("Bad unicode escape");
+                        }
+                        pos += 4;
+                        break;
+                    default:
+                        throw error("Bad escape");
+                }
+            }
+            throw error("Unterminated string");
+        }
+
+        private Number parseNumber() {
+            int start = pos;
+            if (peek('-')) pos++;
+            while (pos < text.length() && Character.isDigit(text.charAt(pos))) pos++;
+            if (peek('.')) {
+                pos++;
+                while (pos < text.length() && Character.isDigit(text.charAt(pos))) pos++;
+            }
+            if (peek('e') || peek('E')) {
+                pos++;
+                if (peek('+') || peek('-')) pos++;
+                while (pos < text.length() && Character.isDigit(text.charAt(pos))) pos++;
+            }
+            String number = text.substring(start, pos);
+            try {
+                if (number.indexOf('.') >= 0 || number.indexOf('e') >= 0 || number.indexOf('E') >= 0) {
+                    return Double.valueOf(number);
+                }
+                return Long.valueOf(number);
+            } catch (NumberFormatException ex) {
+                throw error("Bad number");
+            }
+        }
+
+        private void skipWhitespace() {
+            while (pos < text.length()) {
+                char c = text.charAt(pos);
+                if (c != ' ' && c != '\n' && c != '\r' && c != '\t') {
+                    return;
+                }
+                pos++;
+            }
+        }
+
+        private boolean peek(char expected) {
+            return pos < text.length() && text.charAt(pos) == expected;
+        }
+
+        private void expect(char expected) {
+            skipWhitespace();
+            if (!peek(expected)) {
+                throw error("Expected '" + expected + "'");
+            }
+            pos++;
+        }
+
+        private IllegalArgumentException error(String message) {
+            return new IllegalArgumentException(message + " at offset " + pos);
         }
     }
 

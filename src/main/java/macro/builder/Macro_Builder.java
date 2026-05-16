@@ -59,6 +59,12 @@ import java.util.Locale;
 
 public class Macro_Builder implements PlugIn {
 
+    public static String getPluginVersion() {
+        Package pkg = Macro_Builder.class.getPackage();
+        String version = pkg == null ? null : pkg.getImplementationVersion();
+        return version == null || version.trim().isEmpty() ? "dev" : version;
+    }
+
     @Override
     public void run(String arg) {
         if (GraphicsEnvironment.isHeadless()) {

@@ -3,6 +3,7 @@ package macro.builder.analysis;
 import ij.ImagePlus;
 import ij.ImageStack;
 import ij.process.ByteProcessor;
+import ij.process.FloatProcessor;
 import ij.process.ShortProcessor;
 import macro.builder.analysis.ShootoutSettings.CountingMode;
 import macro.builder.analysis.ShootoutSettings.ThresholdMode;
@@ -175,6 +176,108 @@ public class ThresholdShootoutRunnerTest {
         assertEquals(1, rows.size());
         assertTrue(rows.get(0).isSuccess());
         assertEquals(0, rows.get(0).countSummary.count);
+    }
+
+    @Test
+    public void typedByteMaskPathMatchesReferenceCount() {
+        ByteProcessor processor = new ByteProcessor(3, 2);
+        processor.set(0, 0, 0);
+        processor.set(1, 0, 100);
+        processor.set(2, 0, 101);
+        processor.set(0, 1, 50);
+        processor.set(1, 1, 200);
+        processor.set(2, 1, 99);
+
+        List<ShootoutResult> rows = new ThresholdShootoutRunner().run(
+                new ImagePlus("byte", processor),
+                "",
+                fixedSettings(100.0));
+
+        assertEquals(1, rows.size());
+        ShootoutResult row = rows.get(0);
+        assertTrue(row.isSuccess());
+        assertEquals(3.0, row.countSummary.totalForeground, 0.0001);
+        assertEquals(255, row.maskPreview.getProcessor().get(1, 0));
+        assertEquals(0, row.maskPreview.getProcessor().get(2, 1));
+    }
+
+    @Test
+    public void typedShortMaskPathHandlesSyntheticStackInParallel() {
+        ImageStack stack = new ImageStack(5, 3);
+        for (int s = 0; s < 4; s++) {
+            ShortProcessor processor = new ShortProcessor(5, 3);
+            fill(processor, 1000);
+            processor.set(1, 1, 2000 + s);
+            processor.set(3, 1, 3000 + s);
+            stack.addSlice("slice " + s, processor);
+        }
+
+        List<ShootoutResult> rows = new ThresholdShootoutRunner().run(
+                new ImagePlus("short stack", stack),
+                "",
+                fixedSettings(2000.0));
+
+        assertEquals(1, rows.size());
+        ShootoutResult row = rows.get(0);
+        assertTrue(row.isSuccess());
+        assertEquals(8.0, row.countSummary.totalForeground, 0.0001);
+        assertEquals(255, row.maskPreview.getStack().getProcessor(1).get(1, 1));
+        assertEquals(0, row.maskPreview.getStack().getProcessor(1).get(0, 0));
+        assertEquals(4, row.maskPreview.getStackSize());
+    }
+
+    @Test
+    public void typedFloatMaskPathTreatsNonFinitePixelsAsBackground() {
+        FloatProcessor processor = new FloatProcessor(4, 2);
+        float[] pixels = (float[]) processor.getPixels();
+        pixels[0] = Float.NaN;
+        pixels[1] = Float.POSITIVE_INFINITY;
+        pixels[2] = Float.NEGATIVE_INFINITY;
+        pixels[3] = 1.5f;
+        pixels[4] = 2.0f;
+        pixels[5] = 3.0f;
+        pixels[6] = 0.5f;
+        pixels[7] = 1.0f;
+
+        List<ShootoutResult> rows = new ThresholdShootoutRunner().run(
+                new ImagePlus("float", processor),
+                "",
+                fixedSettings(2.0));
+
+        assertEquals(1, rows.size());
+        ShootoutResult row = rows.get(0);
+        assertTrue(row.isSuccess());
+        assertEquals(2.0, row.countSummary.totalForeground, 0.0001);
+        assertEquals(0, row.maskPreview.getProcessor().get(0, 0));
+        assertEquals(0, row.maskPreview.getProcessor().get(1, 0));
+        assertEquals(255, row.maskPreview.getProcessor().get(0, 1));
+        assertEquals(255, row.maskPreview.getProcessor().get(1, 1));
+    }
+
+    @Test
+    public void contextRunRetainsProcessedImageAndCachedHistogram() {
+        ByteProcessor processor = new ByteProcessor(2, 1);
+        processor.set(0, 0, 1);
+        processor.set(1, 0, 2);
+
+        ShootoutRun run = new ThresholdShootoutRunner().runWithContext(
+                new ImagePlus("source", processor),
+                "run(\"Add...\", \"value=10\");",
+                fixedSettings(11.0));
+
+        try {
+            assertNotNull(run.context);
+            assertEquals(1, run.results.size());
+            assertEquals(256, run.context.histogram.length);
+            assertEquals(11.0, run.context.rangeMin, 0.0001);
+            assertEquals(12.0, run.context.rangeMax, 0.0001);
+            assertEquals(11, run.context.processed.getProcessor().get(0, 0));
+            assertEquals(12, run.context.processed.getProcessor().get(1, 0));
+        } finally {
+            if (run.context != null) {
+                run.context.processed.flush();
+            }
+        }
     }
 
     private static void fill(ShortProcessor processor, int value) {

@@ -90,6 +90,9 @@
                         <manifest>
                             <addClasspath>false</addClasspath>
                         </manifest>
+                        <manifestEntries>
+                            <Implementation-Version>${project.version}</Implementation-Version>
+                        </manifestEntries>
                     </archive>
                 </configuration>
             </plugin>

@@ -50,6 +50,102 @@ For microscope container formats such as `.czi`, `.lif`, `.nd2`, `.oib`, `.oif`,
 
 Count testing and saved batch count macros write CSV result tables. Those rows include the input file or container series, selected channel, threshold method or fixed threshold, count mode, count, size and coverage summaries, status, and any error message.
 
+## Macro And Java API Automation
+
+Run saved filter macros across ordinary image files from an ImageJ macro without opening the Macro Builder UI:
+
+```ijm
+run("Macro Builder",
+    "macro=[C:/analysis/filter.ijm] " +
+    "input=[C:/analysis/images] " +
+    "output=[C:/analysis/output]");
+```
+
+Options are whitespace-separated. Paths with spaces must be bracketed.
+
+| Option | Meaning | Default |
+| --- | --- | --- |
+| `macro=[path]` | Saved `.ijm` filter macro to run. | Required |
+| `input=[path]` | Input image file, image folder, or Bio-Formats container file. | Required |
+| `output=[folder]` | Folder for processed TIFFs and CSV output. | Required |
+| `regex=[pattern]` | Folder filename regex. Must match the whole filename. | Image files |
+| `recursive=true|false` | Recurse through input subfolders. | `true` |
+| `series=<n>` | One-based Bio-Formats series for container-file input. | `1` |
+| `csv=[name-or-path]` | CSV summary path; use `csv=[none]` to skip. | `Macro_Builder_Batch_Run.csv` |
+
+The existing batch-count command remains macro-callable through exported settings:
+
+```ijm
+run("Macro Builder Batch Count",
+    "settings=[C:/analysis/count.settings.json] " +
+    "input=[C:/analysis/images] " +
+    "output=[C:/analysis/counts]");
+```
+
+Other plugins can call the public Java API:
+
+```java
+MacroBuilderResult result = MacroBuilder.runBatch(
+    MacroBuilderParameters.builder()
+        .addInput(BatchMacroInput.file(imageFile, imageFile.getName()))
+        .macro(filterMacroText)
+        .outputDirectory(outputFolder)
+        .build());
+```
+
+The public API lives under `macro.builder.api`. It returns result objects and does not open Macro Builder dialogs.
+
+Reusable API facades are available for the main non-UI engines:
+
+| Class | Purpose |
+| --- | --- |
+| `MacroBuilder` | Batch macro-output runs and batch count runs. |
+| `MacroBuilderCounting` | Single-image Test Counts, one threshold variant, binary object counting, and object detection. |
+| `MacroBuilderMacros` | Apply a chosen count result back into `.ijm` macro text or a Macro Builder DAG. |
+| `MacroBuilderFilters` | Load bundled presets, parse/edit filter macros, inspect filter parameters, and list compatible filter swaps. |
+| `MacroBuilderInputs` | Scan image folders and list/open Bio-Formats container series. |
+| `MacroBuilderBatchExport` | Build or save self-contained batch-count wrapper macros and settings JSON. |
+
+For example, another plugin can run a single-image threshold shootout and promote the selected result into macro text:
+
+```java
+List<ShootoutResult> rows = MacroBuilderCounting.runShootout(
+    imp, filterMacroText, ShootoutSettings.defaults());
+String updatedMacro = MacroBuilderMacros.applyThresholdToIjm(
+    filterMacroText, rows.get(0), ShootoutSettings.defaults());
+MacroBuilderCounting.closeMaskPreviews(rows);
+```
+
+The lower-level facades also support reuse of Macro Builder's presets and input discovery:
+
+```java
+String preset = MacroBuilderFilters.loadPreset("Default");
+List<BatchMacroInput> inputs = MacroBuilderInputs.scanFolder(
+    imageFolder, "(?i).*\\.tif", true);
+MacroBuilderBatchExport.exportWrapperMacro(
+    wrapperFile, preset, ShootoutSettings.defaults(), 1);
+```
+
+APIs that return `ImagePlus` objects, such as variation results, mask previews, retained shootout contexts, or opened Bio-Formats series, transfer image ownership to the caller. Close or flush those images when finished.
+
+Variation workflows can also be used from Java when you already have a Macro Builder DAG or saved macro:
+
+```java
+DagIR baseline = MacroBuilderVariations.loadDag(filterMacroText);
+VariantAxis sweep = MacroBuilderVariations.paramSweep(
+    "node_1", "sigma=1 stack", "sigma=2 stack", "sigma=4 stack");
+
+MacroBuilderVariationResult variants = MacroBuilderVariations.run(
+    MacroBuilderVariationParameters.builder()
+        .sourceImage(imp)
+        .baseline(baseline)
+        .addAxis(sweep)
+        .maxVariants(4)
+        .build());
+```
+
+Variant result images are returned as `ImagePlus` objects. Call `closeOutputs()` when you are done with them and do not plan to show or save them.
+
 ## How It Works
 
 Macro Builder stores visual builder pipelines as a small directed graph and emits ordinary ImageJ macro text for execution. Native builder steps can run channel-aware branches directly. Recorded or unsupported ImageJ commands are preserved as macro steps and run through ImageJ's macro interpreter.
@@ -77,7 +173,7 @@ On macOS or Linux:
 The uploadable plugin jar is written to:
 
 ```text
-target/Macro_Builder-0.2.1.jar
+target/Macro_Builder-0.2.2.jar
 ```
 
 ## Local Fiji Smoke Test

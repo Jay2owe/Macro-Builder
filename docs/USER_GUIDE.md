@@ -54,7 +54,7 @@ The `Loaded Macro` column is enabled after a macro has been built, recorded, or 
 - `Run as batch...` runs the loaded macro on selected batch inputs and saves processed TIFF images plus a CSV summary.
 - `Save as batch macro...` exports a self-contained batch count macro for the current macro and latest count settings.
 - `Edit Macro...` opens the visual builder using the current macro.
-- `Create Macro Variations...` is a placeholder and is not implemented yet.
+- `Create Macro Variations...` opens the visual builder and then the variation chooser for the current macro.
 - `Test Counts...` opens a count-testing dialog for the current macro and selected source image.
 
 The source image is not modified by count testing.
@@ -73,6 +73,19 @@ Previewed rows are ticked by default. Untick rows you do not want, choose an out
 Successful file rows are saved as TIFF files with `_MacroBuilder.tif` appended to the source name. Recursive folder runs preserve matching subfolder paths under the output folder. Container rows are saved with the container name, one-based series number, optional series name, and `_MacroBuilder.tif`. The dialog also writes `Macro_Builder_Batch_Run.csv` with one row per attempted input, including the source, input kind, container series index/name when relevant, output path, status, and error message.
 
 Macro Builder opens each batch input independently and closes its temporary image after saving or failure. The selected source image in the main Macro Builder window is not used as a batch input unless you also select that file in the batch dialog.
+
+### Batch Output Macro Command
+
+You can run the macro-output batch workflow from an ImageJ macro:
+
+```ijm
+run("Macro Builder",
+    "macro=[C:/analysis/filter.ijm] " +
+    "input=[C:/analysis/images] " +
+    "output=[C:/analysis/output]");
+```
+
+Use bracketed paths when folders or filenames contain spaces. Optional tokens are `regex=[pattern]`, `recursive=false`, `series=<n>` for one Bio-Formats container file, and `csv=[name-or-path]`. Use `csv=[none]` to skip the CSV summary.
 
 ## Test Counts
 

@@ -3,49 +3,27 @@ package macro.builder;
 import ij.IJ;
 import ij.Macro;
 import ij.plugin.PlugIn;
-import macro.builder.analysis.BatchMacroExporter;
-import macro.builder.analysis.BatchShootoutResult;
 import macro.builder.analysis.BatchShootoutRunner;
+import macro.builder.api.MacroBuilder;
+import macro.builder.api.MacroBuilderBatchCountParameters;
+import macro.builder.api.MacroBuilderBatchCountResult;
 
 import java.awt.GraphicsEnvironment;
 import java.io.File;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.util.Collections;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
 
 public class Macro_Builder_Batch_Count implements PlugIn {
 
     @Override
     public void run(String arg) {
         try {
-            Map<String, String> options = parseOptions(optionsText(arg));
-            File settingsFile = requiredFile(options, "settings");
-            File input = requiredFile(options, "input");
-            File output = requiredFile(options, "output");
-            if (!output.exists() && !output.mkdirs()) {
-                throw new IllegalArgumentException("Could not create output folder: " + output.getAbsolutePath());
+            MacroBuilderBatchCountParameters parameters =
+                    MacroBuilderBatchCountParameters.fromMacroOptions(
+                            optionsText(arg), new StatusProgress());
+            MacroBuilderBatchCountResult result = MacroBuilder.runBatchCount(parameters);
+            IJ.showStatus("Macro Builder batch count complete: " + result.rows().size() + " row(s).");
+            if (result.csvFile() != null) {
+                IJ.log("Macro Builder batch count wrote " + result.csvFile().getAbsolutePath());
             }
-            if (!output.isDirectory()) {
-                throw new IllegalArgumentException("Output is not a folder: " + output.getAbsolutePath());
-            }
-
-            BatchMacroExporter.ExportedSettings exportedSettings = BatchMacroExporter.readSettings(settingsFile);
-            File macroFile = exportedSettings.macroFile();
-            String macro = new String(Files.readAllBytes(macroFile.toPath()), StandardCharsets.UTF_8);
-
-            List<BatchShootoutResult> rows = new BatchShootoutRunner().run(
-                    Collections.singletonList(input),
-                    macro,
-                    exportedSettings.settings,
-                    exportedSettings.primaryChannel,
-                    new StatusProgress());
-            File csv = new File(output, exportedSettings.resultsFile);
-            Files.write(csv.toPath(), BatchShootoutRunner.buildCsv(rows).getBytes(StandardCharsets.UTF_8));
-            IJ.showStatus("Macro Builder batch count complete: " + rows.size() + " row(s).");
-            IJ.log("Macro Builder batch count wrote " + csv.getAbsolutePath());
         } catch (Exception ex) {
             reportFailure(ex);
         }
@@ -57,65 +35,6 @@ public class Macro_Builder_Batch_Count implements PlugIn {
         }
         String options = Macro.getOptions();
         return options == null ? "" : options;
-    }
-
-    private static File requiredFile(Map<String, String> options, String key) {
-        String value = options.get(key);
-        if (value == null || value.trim().isEmpty()) {
-            throw new IllegalArgumentException("Missing required option: " + key);
-        }
-        return new File(value);
-    }
-
-    private static Map<String, String> parseOptions(String options) {
-        Map<String, String> parsed = new LinkedHashMap<String, String>();
-        if (options == null) {
-            return parsed;
-        }
-        int i = 0;
-        while (i < options.length()) {
-            while (i < options.length() && Character.isWhitespace(options.charAt(i))) {
-                i++;
-            }
-            int keyStart = i;
-            while (i < options.length() && options.charAt(i) != '=' && !Character.isWhitespace(options.charAt(i))) {
-                i++;
-            }
-            if (keyStart == i) {
-                i++;
-                continue;
-            }
-            String key = options.substring(keyStart, i);
-            while (i < options.length() && Character.isWhitespace(options.charAt(i))) {
-                i++;
-            }
-            if (i >= options.length() || options.charAt(i) != '=') {
-                continue;
-            }
-            i++;
-            while (i < options.length() && Character.isWhitespace(options.charAt(i))) {
-                i++;
-            }
-            String value;
-            if (i < options.length() && options.charAt(i) == '[') {
-                int valueStart = ++i;
-                while (i < options.length() && options.charAt(i) != ']') {
-                    i++;
-                }
-                value = options.substring(valueStart, i);
-                if (i < options.length() && options.charAt(i) == ']') {
-                    i++;
-                }
-            } else {
-                int valueStart = i;
-                while (i < options.length() && !Character.isWhitespace(options.charAt(i))) {
-                    i++;
-                }
-                value = options.substring(valueStart, i);
-            }
-            parsed.put(key, value);
-        }
-        return parsed;
     }
 
     private static void reportFailure(Exception ex) {

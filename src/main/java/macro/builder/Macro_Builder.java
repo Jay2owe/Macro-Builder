@@ -1,8 +1,14 @@
 package macro.builder;
 
 import macro.builder.analysis.BatchMacroExporter;
+import macro.builder.analysis.BatchMacroInput;
+import macro.builder.analysis.BatchMacroResult;
+import macro.builder.analysis.BatchMacroRunner;
 import macro.builder.analysis.MacroBatchCompatibility;
 import macro.builder.analysis.ShootoutSettings;
+import macro.builder.api.MacroBuilder;
+import macro.builder.api.MacroBuilderParameters;
+import macro.builder.api.MacroBuilderResult;
 import macro.builder.image.FilterExecutor;
 import macro.builder.image.dag.DagIR;
 import macro.builder.image.dag.DagIRSerializer;
@@ -17,6 +23,7 @@ import macro.builder.ui.ThresholdShootoutDialog;
 import macro.builder.ui.sandbox.SandboxDialog;
 import ij.IJ;
 import ij.ImagePlus;
+import ij.Macro;
 import ij.WindowManager;
 import ij.plugin.Duplicator;
 import ij.plugin.PlugIn;
@@ -69,8 +76,13 @@ public class Macro_Builder implements PlugIn {
 
     @Override
     public void run(String arg) {
+        String options = optionsText(arg);
+        if (options != null && !options.trim().isEmpty()) {
+            runFromOptions(options);
+            return;
+        }
         if (GraphicsEnvironment.isHeadless()) {
-            IJ.log("Macro Builder needs the Fiji desktop UI.");
+            IJ.log("Macro Builder needs the Fiji desktop UI unless macro options are supplied.");
             return;
         }
         SwingUtilities.invokeLater(new Runnable() {
@@ -78,6 +90,93 @@ public class Macro_Builder implements PlugIn {
                 new SessionDialog().open();
             }
         });
+    }
+
+    private static String optionsText(String arg) {
+        if (arg != null && !arg.trim().isEmpty()) {
+            return arg;
+        }
+        String options = Macro.getOptions();
+        return options == null ? "" : options;
+    }
+
+    private static void runFromOptions(String options) {
+        try {
+            MacroBuilderParameters parameters =
+                    MacroBuilderParameters.fromMacroOptions(options, new BatchStatusProgress());
+            MacroBuilderResult result = MacroBuilder.runBatch(parameters);
+            IJ.showStatus("Macro Builder batch run complete: " + result.rows().size() + " row(s).");
+            if (result.csvFile() != null) {
+                IJ.log("Macro Builder batch run wrote " + result.csvFile().getAbsolutePath());
+            }
+        } catch (Exception ex) {
+            reportFailure(ex);
+        }
+    }
+
+    private static void reportFailure(Exception ex) {
+        String message = cleanMessage(ex);
+        IJ.log("Macro Builder batch run failed: " + message);
+        if (!GraphicsEnvironment.isHeadless()) {
+            IJ.showMessage("Macro Builder", "Batch run failed:\n" + message);
+        }
+    }
+
+    private static String cleanMessage(Throwable ex) {
+        if (ex == null) {
+            return "Unknown error";
+        }
+        String message = ex.getMessage();
+        if (message == null || message.trim().isEmpty()) {
+            return ex.getClass().getSimpleName();
+        }
+        return message.trim().replace('\n', ' ').replace('\r', ' ');
+    }
+
+    private static final class BatchStatusProgress implements BatchMacroRunner.Progress {
+        @Override public void onStarted(int totalItems) {
+            IJ.showStatus("Macro Builder batch run: " + totalItems + " item(s).");
+        }
+
+        @Override public void onItemStarted(BatchMacroInput input, int index, int totalItems) {
+            IJ.showStatus("Macro Builder batch run " + index + "/" + totalItems + ": "
+                    + inputName(input));
+        }
+
+        @Override public void onItemProgress(
+                BatchMacroInput input,
+                int index,
+                int totalItems,
+                String message) {
+            IJ.showStatus("Macro Builder batch run " + index + "/" + totalItems + ": "
+                    + cleanMessage(message));
+        }
+
+        @Override public void onItemFinished(
+                BatchMacroInput input,
+                int index,
+                int totalItems,
+                BatchMacroResult result) {
+            IJ.showStatus("Macro Builder batch run " + index + "/" + totalItems
+                    + " complete: " + (result == null ? "" : result.status.name()));
+        }
+
+        @Override public boolean isCancelled() {
+            return false;
+        }
+
+        private static String inputName(BatchMacroInput input) {
+            if (input == null || input.file == null) {
+                return "";
+            }
+            return input.file.getName();
+        }
+
+        private static String cleanMessage(String message) {
+            return message == null || message.trim().isEmpty()
+                    ? "Running macro..."
+                    : message.trim();
+        }
     }
 
     private static final class SessionDialog {

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.2 - 2026-05-21
+
+- Added ImageJ macro option automation for running Macro Builder batch-output workflows without opening the UI.
+- Added public Java API facades under `macro.builder.api` for batch runs, counting, filters, inputs, macro updates, batch export, and variation workflows.
+- Added API and macro-option parser regression tests.
+- Documented macro-callable batch runs and Java API usage.
+
 ## 0.2.1 - 2026-05-21
 
 - Added preview display controls, histogram/range UI helpers, sandbox undo history, and macro save helpers.

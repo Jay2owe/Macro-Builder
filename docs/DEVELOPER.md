@@ -58,7 +58,7 @@ On macOS or Linux:
 The main plugin jar is:
 
 ```text
-target/Macro_Builder-0.2.1.jar
+target/Macro_Builder-0.2.2.jar
 ```
 
 Do not upload the generated `*-sources.jar` or `*-tests.jar` files to the ImageJ update site.
@@ -108,6 +108,19 @@ source,kind,series_index,series_name,width,height,channels,slices,frames,output,
 The stored `series_index` is the zero-based Bio-Formats index used to reopen the series. User-facing labels may display one-based series numbers.
 
 Cancellation is cooperative. `BatchMacroDialog` asks the runner to stop before the next input; it should not interrupt a macro already running inside ImageJ.
+
+## Public Java API
+
+Public API facades live in `src/main/java/macro/builder/api/`. They should stay small, stable, and non-UI:
+
+- `MacroBuilder` runs macro-output batches and batch count workflows.
+- `MacroBuilderCounting` wraps single-image threshold shootouts, one-variant count runs, binary object counting, and object detection.
+- `MacroBuilderMacros` applies a selected threshold/count result back into `.ijm` text or a Macro Builder DAG.
+- `MacroBuilderFilters` exposes bundled presets, macro parsing/editing, batch-compatibility warnings, filter parameter metadata, and compatible filter swaps.
+- `MacroBuilderInputs` exposes folder scanning and Bio-Formats series listing/opening.
+- `MacroBuilderBatchExport` builds and saves self-contained batch-count wrapper macros.
+
+Do not make Swing dialogs part of the API contract. If an API returns `ImagePlus` objects, document caller ownership and provide a cleanup helper where practical.
 
 ## Count Testing
 

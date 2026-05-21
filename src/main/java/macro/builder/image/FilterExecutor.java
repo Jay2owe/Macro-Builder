@@ -1,0 +1,1382 @@
+package macro.builder.image;
+
+import ij.IJ;
+import ij.ImagePlus;
+import ij.ImageStack;
+import ij.Prefs;
+import ij.measure.Calibration;
+import ij.measure.ResultsTable;
+import ij.plugin.ContrastEnhancer;
+import ij.plugin.GaussianBlur3D;
+import ij.plugin.filter.BackgroundSubtracter;
+import ij.plugin.filter.GaussianBlur;
+import ij.plugin.filter.RankFilters;
+import ij.plugin.frame.RoiManager;
+import ij.process.BinaryProcessor;
+import ij.process.ByteProcessor;
+import ij.process.ColorProcessor;
+import ij.process.FloatProcessor;
+import ij.process.AutoThresholder;
+import ij.process.ImageConverter;
+import ij.process.ImageProcessor;
+import ij.process.ImageStatistics;
+import ij.process.ShortProcessor;
+
+import macro.builder.image.ParallelContext;
+import macro.builder.image.dag.Combiner;
+import macro.builder.image.dag.CombinerOp;
+import macro.builder.image.dag.DagIR;
+import macro.builder.image.dag.DagLine;
+import macro.builder.image.dag.DagNode;
+import macro.builder.image.dag.DagRejectedException;
+import macro.builder.image.dag.DagToIjmEmitter;
+import macro.builder.image.dag.IjmToDagLoader;
+
+import java.awt.GraphicsEnvironment;
+import java.io.File;
+import java.lang.reflect.Field;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Deque;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+
+/**
+ * Executes ImageJ filter macros on an ImagePlus.
+ *
+ * Provides both legacy macro-based execution (single-threaded, requires active window)
+ * and thread-safe native Java execution using ImageJ's processor-level APIs.
+ */
+public final class FilterExecutor {
+
+    /** Minimum slice count before parallel execution kicks in. */
+    private static final int SLICE_PARALLEL_THRESHOLD = 4;
+
+    public interface Progress {
+        void setIndeterminate(String message);
+        void setProgress(int completedSteps, int totalSteps, String message);
+    }
+
+    private static final Progress NO_PROGRESS = new Progress() {
+        @Override public void setIndeterminate(String message) {
+        }
+
+        @Override public void setProgress(int completedSteps, int totalSteps, String message) {
+        }
+    };
+
+    private FilterExecutor() {}
+
+    // ── Legacy macro-based execution (NOT thread-safe) ──
+
+    public static void runIjmFile(final ImagePlus imp, final File ijmFile) {
+        if (imp == null || ijmFile == null || !ijmFile.exists()) return;
+        try {
+            String content = new String(java.nio.file.Files.readAllBytes(ijmFile.toPath()),
+                    java.nio.charset.StandardCharsets.UTF_8);
+            Boolean dagResult = runEmbeddedDagIfPresent(imp, content, NO_PROGRESS);
+            if (dagResult != null) return;
+        } catch (Exception e) {
+            IJ.log("WARNING: could not inspect IJM file for embedded Sandbox DAG: " + e.getMessage());
+        }
+        runLegacyMacroSandboxed(imp, new Runnable() {
+            @Override
+            public void run() {
+                IJ.runMacroFile(ijmFile.getAbsolutePath());
+            }
+        });
+    }
+
+    public static void runMacroString(final ImagePlus imp, final String macroContent) {
+        if (imp == null || macroContent == null || macroContent.isEmpty()) return;
+        Boolean dagResult = runEmbeddedDagIfPresent(imp, macroContent, NO_PROGRESS);
+        if (dagResult != null) return;
+        runLegacyMacroSandboxed(imp, new Runnable() {
+            @Override
+            public void run() {
+                IJ.runMacro(macroContent);
+            }
+        });
+    }
+
+    /**
+     * Runs an IJ1 macro fragment under a safety sandbox.
+     * <p>
+     * Snapshots {@link ij.WindowManager} state before the macro runs and, after
+     * it completes (or throws), force-closes any image windows the macro left
+     * behind that are not the kept input image, then resets the global
+     * {@link ResultsTable} and {@link RoiManager}.
+     * <p>
+     * This protects batch runs from custom macros that forget {@code close();}
+     * or leak ROIs/results across iterations. The kept input image (if non-null)
+     * is excluded from the sweep — adoption of a renamed result, if any, runs
+     * before the sweep so adopted images do not appear stray.
+     * <p>
+     * Caller is responsible for any required {@link WindowManagerLock} acquisition.
+     */
+    private static void runLegacyMacroSandboxed(ImagePlus imp, Runnable macroCall) {
+        runLegacyMacroSandboxed(imp, macroCall, null);
+    }
+
+    /**
+     * @param keepTitles optional set of image titles to spare from the
+     *                   {@link #closeStrayImages} sweep — used when a macro
+     *                   intentionally produces a secondary output (e.g. a
+     *                   mask channel) that the caller wants to adopt.
+     */
+    private static void runLegacyMacroSandboxed(ImagePlus imp, Runnable macroCall, Set<String> keepTitles) {
+        String originalTitle = imp == null ? null : imp.getTitle();
+        int originalId = imp == null ? 0 : imp.getID();
+        Calibration originalCalibration = copyCalibration(imp);
+        Set<Integer> beforeIds = snapshotWindowIds();
+        boolean attachedTemp = false;
+        try {
+            if (imp != null) {
+                if (GraphicsEnvironment.isHeadless()) {
+                    // Headless: there is no ImageWindow framework. Register
+                    // imp as the macro interpreter's current image without
+                    // opening a window — avoids the imp.show() side effects
+                    // that otherwise log warnings or fail under --headless.
+                    ij.WindowManager.setTempCurrentImage(imp);
+                    attachedTemp = true;
+                } else {
+                    imp.show();
+                    imp.setActivated();
+                }
+            }
+            macroCall.run();
+            if (imp != null) adoptResultIfOriginalClosed(imp, originalTitle, originalId);
+            restoreCalibrationIfLost(imp, originalCalibration);
+        } finally {
+            if (attachedTemp) {
+                ij.WindowManager.setTempCurrentImage(null);
+            }
+            closeStrayImages(beforeIds, imp, keepTitles);
+            resetResultsTable();
+            resetRoiManager();
+        }
+    }
+
+    private static Set<Integer> snapshotWindowIds() {
+        int[] ids = ij.WindowManager.getIDList();
+        Set<Integer> set = new HashSet<Integer>();
+        if (ids != null) {
+            for (int id : ids) set.add(id);
+        }
+        return set;
+    }
+
+    private static void closeStrayImages(Set<Integer> beforeIds, ImagePlus keep) {
+        closeStrayImages(beforeIds, keep, null);
+    }
+
+    private static void closeStrayImages(Set<Integer> beforeIds, ImagePlus keep, Set<String> keepTitles) {
+        int[] after = ij.WindowManager.getIDList();
+        if (after == null) return;
+        for (int id : after) {
+            if (beforeIds.contains(id)) continue;
+            ImagePlus rogue = ij.WindowManager.getImage(id);
+            if (rogue == null || rogue == keep) continue;
+            if (keepTitles != null && keepTitles.contains(rogue.getTitle())) continue;
+            IJ.log("WARNING: custom macro leaked image '" + rogue.getTitle()
+                    + "', auto-closing.");
+            rogue.changes = false;
+            rogue.close();
+        }
+    }
+
+    private static void resetResultsTable() {
+        ResultsTable rt = ResultsTable.getResultsTable();
+        if (rt != null && rt.getCounter() > 0) {
+            rt.reset();
+        }
+    }
+
+    private static void resetRoiManager() {
+        RoiManager rm = RoiManager.getInstance();
+        if (rm != null) {
+            rm.reset();
+        }
+    }
+
+    /**
+     * After running a macro, the original image may have been closed if the macro
+     * created new images via Duplicate/imageCalculator and called close(original).
+     * In that case, find the result image and adopt its data back into {@code imp}
+     * so the caller's reference remains valid.
+     *
+     * Uses an ID snapshot to detect "modified in place": the prior
+     * {@code imp.getWindow() != null} check produced false positives in
+     * headless mode (no window ever exists) and false negatives when a
+     * macro detached the image from its window without closing the data.
+     *
+     * Looks for a result image by the original title first (macros often rename
+     * the result back to the original name), then falls back to the current
+     * active image.
+     */
+    private static void adoptResultIfOriginalClosed(ImagePlus imp, String originalTitle, int originalId) {
+        // ID snapshot: if WindowManager still has this ID associated with imp,
+        // the macro modified it in place. Works in both headless and UI modes.
+        ImagePlus afterById = ij.WindowManager.getImage(originalId);
+        if (afterById == imp) return;
+
+        // Headless attach via setTempCurrentImage doesn't add an ID to the
+        // IDList. If imp is still the WM current image, treat as in-place.
+        if (GraphicsEnvironment.isHeadless() && ij.WindowManager.getCurrentImage() == imp) return;
+
+        // Try to find the result by original title (macros may rename result to match)
+        ImagePlus result = ij.WindowManager.getImage(originalTitle);
+        if (result == null || result == imp) {
+            // Fall back to the current active image
+            result = ij.WindowManager.getCurrentImage();
+        }
+        if (result == null || result == imp || result.getStackSize() == 0) return;
+
+        imp.setStack(result.getStack());
+        imp.setDimensions(result.getNChannels(), result.getNSlices(), result.getNFrames());
+        if (result.getCalibration() != null) imp.setCalibration(result.getCalibration());
+        result.changes = false;
+        result.close();
+    }
+
+    // ── Thread-safe native execution ──
+
+    /**
+     * Executes a filter macro string using direct Java API calls (no macro interpreter).
+     * Thread-safe: operates only on the given ImagePlus's processors.
+     *
+     * If any operation in the macro is unrecognized, falls back to synchronized
+     * macro execution for the entire macro.
+     *
+     * @return true if executed natively (or via a known compound handler), false
+     *         if it fell back to the locked legacy macro path
+     */
+    public static boolean runThreadSafe(ImagePlus imp, String macroContent) {
+        return runThreadSafe(imp, macroContent, null);
+    }
+
+    public static boolean runThreadSafe(ImagePlus imp, String macroContent, Progress progress) {
+        Progress callback = progress == null ? NO_PROGRESS : progress;
+        if (imp == null || macroContent == null || macroContent.isEmpty()) return true;
+
+        callback.setIndeterminate("Inspecting macro...");
+        Boolean dagResult = runEmbeddedDagIfPresent(imp, macroContent, callback);
+        if (dagResult != null) return dagResult.booleanValue();
+
+        // Known compound filters with legacy WindowManager flows run under the window lock.
+        if (PunctaResolveFilter.matches(macroContent)) {
+            callback.setIndeterminate("Running Puncta Resolve filter...");
+            WindowManagerLock.LOCK.lock();
+            try {
+                PunctaResolveFilter.apply(imp, macroContent);
+            } finally {
+                WindowManagerLock.LOCK.unlock();
+            }
+            callback.setProgress(1, 1, "Puncta Resolve filter complete.");
+            return true;
+        }
+        if (DiffuseObjectFilter.matches(macroContent)) {
+            callback.setIndeterminate("Running diffuse object filter...");
+            DiffuseObjectFilter.apply(imp, macroContent);
+            callback.setProgress(1, 1, "Diffuse object filter complete.");
+            return true;
+        }
+
+        List<FilterMacroParser.Op> ops = FilterMacroParser.parseString(macroContent);
+        if (ops.isEmpty()) {
+            callback.setProgress(1, 1, "No macro steps to run.");
+            return true;
+        }
+
+        // Check if all ops can be executed natively
+        for (FilterMacroParser.Op op : ops) {
+            if (op.type == FilterMacroParser.OpType.UNKNOWN) {
+                // Fall back to locked macro execution
+                callback.setIndeterminate("Running legacy macro...");
+                WindowManagerLock.LOCK.lock();
+                try {
+                    runMacroString(imp, macroContent);
+                } finally {
+                    // Close window to prevent stale entries in WindowManager
+                    // that would collide with subsequent macro executions.
+                    closeWindowSafely(imp);
+                    WindowManagerLock.LOCK.unlock();
+                }
+                callback.setProgress(1, 1, "Legacy macro complete.");
+                return false;
+            }
+        }
+
+        // Execute all ops natively
+        int total = ops.size();
+        callback.setProgress(0, total, "Running macro...");
+        for (int i = 0; i < total; i++) {
+            FilterMacroParser.Op op = ops.get(i);
+            String label = opLabel(op);
+            callback.setProgress(i, total, "Step " + (i + 1) + "/" + total + ": " + label);
+            executeOpOnStack(imp, op);
+            callback.setProgress(i + 1, total, "Completed " + (i + 1) + "/" + total + ": " + label);
+        }
+        return true;
+    }
+
+    private static Boolean runEmbeddedDagIfPresent(ImagePlus imp, String macroContent, Progress progress) {
+        DagIR dag = IjmToDagLoader.loadEmbeddedDag(macroContent);
+        if (dag == null) return null;
+        Progress callback = progress == null ? NO_PROGRESS : progress;
+        try {
+            callback.setIndeterminate("Running visual builder macro...");
+            ImagePlus result;
+            if ("legacy".equals(dag.executionTier)) {
+                ImagePlus source = cloneStackPerSlice(imp, "dag_source");
+                WindowManagerLock.LOCK.lock();
+                try {
+                    result = runLegacyDagSandboxed(source, dag);
+                } finally {
+                    WindowManagerLock.LOCK.unlock();
+                }
+            } else {
+                result = runDagThreadSafe(imp, dag);
+            }
+            applyResultInPlace(imp, result);
+            callback.setProgress(1, 1, "Visual builder macro complete.");
+            return Boolean.valueOf(!"legacy".equals(dag.executionTier));
+        } catch (DagRejectedException e) {
+            IJ.log("WARNING: embedded Sandbox DAG failed, falling back to macro execution: " + e.getMessage());
+            return null;
+        }
+    }
+
+    private static String opLabel(FilterMacroParser.Op op) {
+        if (op == null || op.type == null) return "macro step";
+        String name = op.type.name().toLowerCase(java.util.Locale.ROOT).replace('_', ' ');
+        StringBuilder label = new StringBuilder();
+        boolean upperNext = true;
+        for (int i = 0; i < name.length(); i++) {
+            char ch = name.charAt(i);
+            if (upperNext && ch >= 'a' && ch <= 'z') {
+                label.append((char) (ch - 32));
+            } else {
+                label.append(ch);
+            }
+            upperNext = ch == ' ';
+        }
+        return label.toString();
+    }
+
+    private static void applyResultInPlace(ImagePlus target, ImagePlus result) {
+        if (target == null || result == null || result.getStackSize() == 0) return;
+        Calibration originalCalibration = copyCalibration(target);
+        target.setStack(result.getStack());
+        target.setDimensions(result.getNChannels(), result.getNSlices(), result.getNFrames());
+        if (result.getCalibration() != null) {
+            target.setCalibration(result.getCalibration().copy());
+        }
+        restoreCalibrationIfLost(target, originalCalibration);
+        target.setDisplayRange(result.getDisplayRangeMin(), result.getDisplayRangeMax());
+        target.updateAndDraw();
+    }
+
+    private static Calibration copyCalibration(ImagePlus image) {
+        return image == null || image.getCalibration() == null
+                ? null
+                : image.getCalibration().copy();
+    }
+
+    private static void restoreCalibrationIfLost(ImagePlus image, Calibration original) {
+        if (image == null || !isCalibrated(original)) return;
+        if (!isCalibrated(image.getCalibration())) {
+            image.setCalibration(original.copy());
+        }
+    }
+
+    private static boolean isCalibrated(Calibration calibration) {
+        if (calibration == null) return false;
+        String unit = calibration.getUnit();
+        String lower = unit == null ? "" : unit.trim().toLowerCase(java.util.Locale.ROOT);
+        if ("".equals(lower) || "pixel".equals(lower) || "pixels".equals(lower)) return false;
+        return positiveCalibrationValue(calibration.pixelWidth)
+                && positiveCalibrationValue(calibration.pixelHeight);
+    }
+
+    private static boolean positiveCalibrationValue(double value) {
+        return !Double.isNaN(value) && !Double.isInfinite(value) && value > 0.0;
+    }
+
+    /**
+     * Executes a filter .ijm file using direct Java API calls.
+     * Thread-safe version of runIjmFile.
+     */
+    public static boolean runIjmFileThreadSafe(ImagePlus imp, File ijmFile) {
+        if (imp == null || ijmFile == null || !ijmFile.exists()) return true;
+        try {
+            // Read file content to check for compound filter patterns
+            String content = new String(java.nio.file.Files.readAllBytes(ijmFile.toPath()),
+                    java.nio.charset.StandardCharsets.UTF_8);
+            if (PunctaResolveFilter.matches(content)) {
+                WindowManagerLock.LOCK.lock();
+                try {
+                    PunctaResolveFilter.apply(imp, content);
+                } finally {
+                    WindowManagerLock.LOCK.unlock();
+                }
+                return true;
+            }
+            if (DiffuseObjectFilter.matches(content)) {
+                DiffuseObjectFilter.apply(imp, content);
+                return true;
+            }
+
+            List<FilterMacroParser.Op> ops = FilterMacroParser.parse(ijmFile);
+            for (FilterMacroParser.Op op : ops) {
+                if (op.type == FilterMacroParser.OpType.UNKNOWN) {
+                    WindowManagerLock.LOCK.lock();
+                    try {
+                        runIjmFile(imp, ijmFile);
+                    } finally {
+                        closeWindowSafely(imp);
+                        WindowManagerLock.LOCK.unlock();
+                    }
+                    return false;
+                }
+            }
+            for (FilterMacroParser.Op op : ops) {
+                executeOpOnStack(imp, op);
+            }
+            return true;
+        } catch (Exception e) {
+            WindowManagerLock.LOCK.lock();
+            try {
+                runIjmFile(imp, ijmFile);
+            } finally {
+                closeWindowSafely(imp);
+                WindowManagerLock.LOCK.unlock();
+            }
+            return false;
+        }
+    }
+
+    /**
+     * Executes a Sandbox DAG fully natively, without showing images or touching
+     * WindowManager. All line branches start from fresh per-slice crops of the
+     * source image; combiner nodes always write a new 32-bit float stack.
+     */
+    public static ImagePlus runDagThreadSafe(ImagePlus source, DagIR dag)
+            throws DagRejectedException {
+        validateDagCanRunNative(source, dag);
+
+        Map<String, ImagePlus> bus = new HashMap<String, ImagePlus>();
+        Map<String, Integer> remainingUses = countRemainingUses(dag);
+
+        for (DagLine line : dag.lines) {
+            ImagePlus work = cloneChannelStack(source, line.sourceChannel, line.id);
+            for (DagNode node : line.ops) {
+                executeOpOnStack(work, new FilterMacroParser.Op(node.type, node.args));
+            }
+            bus.put(line.id, work);
+            releaseIfUnused(bus, remainingUses, line.id);
+        }
+
+        for (Combiner combiner : dag.combiners) {
+            List<ImagePlus> inputs = resolveInputs(bus, combiner);
+            ImagePlus combined = combineNative(combiner, inputs);
+            bus.put(combiner.id, combined);
+
+            for (String inputId : combiner.inputs) {
+                decrementUse(remainingUses, inputId);
+                releaseIfUnused(bus, remainingUses, inputId);
+            }
+            releaseIfUnused(bus, remainingUses, combiner.id);
+        }
+
+        ImagePlus result = bus.remove(dag.output);
+        if (result == null) throw new DagRejectedException("DAG output was not produced: " + dag.output);
+        flushAll(bus);
+        return result;
+    }
+
+    /**
+     * Executes a legacy Sandbox DAG through the IJ1 macro interpreter under the
+     * same WindowManager cleanup used for imported custom macros.
+     */
+    public static ImagePlus runLegacyDagSandboxed(final ImagePlus source, final DagIR dag)
+            throws DagRejectedException {
+        if (source == null) throw new DagRejectedException("Source image is required");
+        if (dag == null) throw new DagRejectedException("DAG is required");
+        if (!"legacy".equals(dag.executionTier)) {
+            throw new DagRejectedException("DAG is not marked for legacy execution");
+        }
+        final ImagePlus[] result = new ImagePlus[1];
+        WindowManagerLock.LOCK.lock();
+        try {
+            runLegacyMacroSandboxed(source, new Runnable() {
+                @Override public void run() {
+                    IJ.runMacro(DagToIjmEmitter.emit(dag));
+                    ImagePlus output = ij.WindowManager.getImage(DagToIjmEmitter.macroTitleForId(dag.output));
+                    if (output == null) output = ij.WindowManager.getCurrentImage();
+                    if (output != null) {
+                        result[0] = cloneStackPerSlice(output, "legacy_preview");
+                    }
+                }
+            });
+        } finally {
+            closeWindowSafely(source);
+            WindowManagerLock.LOCK.unlock();
+        }
+        if (result[0] == null) {
+            throw new DagRejectedException("Legacy DAG did not produce an output image: " + dag.output);
+        }
+        return result[0];
+    }
+
+    private static void validateDagCanRunNative(ImagePlus source, DagIR dag)
+            throws DagRejectedException {
+        if (source == null) throw new DagRejectedException("Source image is required");
+        if (dag == null) throw new DagRejectedException("DAG is required");
+        if ("legacy".equals(dag.executionTier)) {
+            throw new DagRejectedException("Legacy DAGs must run through the legacy macro sandbox");
+        }
+        if (!"native".equals(dag.executionTier)) {
+            throw new DagRejectedException("Unsupported DAG execution tier: " + dag.executionTier);
+        }
+        for (DagLine line : dag.lines) {
+            if (line.id.length() == 0) throw new DagRejectedException("DAG line id is required");
+            for (DagNode node : line.ops) {
+                if (node.type == FilterMacroParser.OpType.UNKNOWN) {
+                    throw new DagRejectedException("Unknown DAG op rejected: " + node.id);
+                }
+            }
+        }
+    }
+
+    private static Map<String, Integer> countRemainingUses(DagIR dag) {
+        Map<String, Integer> uses = new HashMap<String, Integer>();
+        if (dag.output != null && dag.output.length() > 0) incrementUse(uses, dag.output);
+        for (Combiner combiner : dag.combiners) {
+            for (String input : combiner.inputs) {
+                incrementUse(uses, input);
+            }
+        }
+        return uses;
+    }
+
+    private static void incrementUse(Map<String, Integer> uses, String id) {
+        Integer count = uses.get(id);
+        uses.put(id, count == null ? 1 : count + 1);
+    }
+
+    private static void decrementUse(Map<String, Integer> uses, String id) {
+        Integer count = uses.get(id);
+        if (count == null || count.intValue() <= 0) return;
+        uses.put(id, count - 1);
+    }
+
+    private static void releaseIfUnused(Map<String, ImagePlus> bus,
+                                        Map<String, Integer> remainingUses,
+                                        String id) {
+        Integer count = remainingUses.get(id);
+        if (count != null && count.intValue() > 0) return;
+        ImagePlus imp = bus.remove(id);
+        if (imp != null) imp.flush();
+    }
+
+    private static void flushAll(Map<String, ImagePlus> bus) {
+        for (ImagePlus imp : bus.values()) {
+            if (imp != null) imp.flush();
+        }
+        bus.clear();
+    }
+
+    private static List<ImagePlus> resolveInputs(Map<String, ImagePlus> bus, Combiner combiner)
+            throws DagRejectedException {
+        if (combiner.inputs.size() < 2) {
+            throw new DagRejectedException("Combiner requires at least two inputs: " + combiner.id);
+        }
+        List<ImagePlus> inputs = new ArrayList<ImagePlus>();
+        for (String id : combiner.inputs) {
+            ImagePlus imp = bus.get(id);
+            if (imp == null) throw new DagRejectedException("Missing combiner input: " + id);
+            inputs.add(imp);
+        }
+        return inputs;
+    }
+
+    private static ImagePlus cloneStackPerSlice(ImagePlus source, String label) {
+        ImageStack src = source.getStack();
+        int width = source.getWidth();
+        int height = source.getHeight();
+        ImageStack copy = new ImageStack(width, height);
+        for (int s = 1; s <= src.getSize(); s++) {
+            ImageProcessor ip = src.getProcessor(s);
+            ImageProcessor cropped = ip.duplicate();
+            copy.addSlice(src.getSliceLabel(s), cropped);
+        }
+        ImagePlus out = new ImagePlus(source.getTitle() + "-" + label, copy);
+        if (source.getCalibration() != null) out.setCalibration(source.getCalibration().copy());
+        int c = source.getNChannels();
+        int z = source.getNSlices();
+        int t = source.getNFrames();
+        if (c * z * t == copy.getSize()) out.setDimensions(c, z, t);
+        return out;
+    }
+
+    public static ImagePlus duplicateChannel(ImagePlus source, int sourceChannel, String title) {
+        if (source == null || source.getStack() == null) {
+            throw new IllegalArgumentException("Source image is required");
+        }
+        int channels = Math.max(1, source.getNChannels());
+        int slices = Math.max(1, source.getNSlices());
+        int frames = Math.max(1, source.getNFrames());
+        if (sourceChannel < 1 || sourceChannel > channels) {
+            throw new IllegalArgumentException("Source channel C" + sourceChannel
+                    + " is not available; image has C=" + channels);
+        }
+
+        ImageStack src = source.getStack();
+        int width = source.getWidth();
+        int height = source.getHeight();
+        ImageStack copy = new ImageStack(width, height);
+        for (int t = 1; t <= frames; t++) {
+            for (int z = 1; z <= slices; z++) {
+                int stackIndex = source.getStackIndex(sourceChannel, z, t);
+                ImageProcessor ip = src.getProcessor(stackIndex);
+                ImageProcessor cropped = ip.duplicate();
+                copy.addSlice(src.getSliceLabel(stackIndex), cropped);
+            }
+        }
+
+        ImagePlus out = new ImagePlus(title == null ? source.getTitle() + "-C" + sourceChannel : title, copy);
+        if (source.getCalibration() != null) out.setCalibration(source.getCalibration().copy());
+        if (slices * frames == copy.getSize()) {
+            out.setDimensions(1, slices, frames);
+            if (source.isHyperStack()) out.setOpenAsHyperStack(true);
+        }
+        return out;
+    }
+
+    private static ImagePlus cloneChannelStack(ImagePlus source, int sourceChannel, String label)
+            throws DagRejectedException {
+        try {
+            String baseTitle = source == null ? "source" : source.getTitle();
+            return duplicateChannel(source, sourceChannel, baseTitle + "-" + label + "-C" + sourceChannel);
+        } catch (IllegalArgumentException ex) {
+            String message = ex.getMessage();
+            if (message != null && message.startsWith("Source channel")) {
+                int channels = source == null ? 0 : Math.max(1, source.getNChannels());
+                throw new DagRejectedException("Branch source channel C" + sourceChannel
+                        + " is not available; image has C=" + channels);
+            }
+            throw new DagRejectedException(message == null ? "Source image is required" : message);
+        }
+    }
+
+    private static ImagePlus combineNative(Combiner combiner, List<ImagePlus> inputs)
+            throws DagRejectedException {
+        ImagePlus first = inputs.get(0);
+        int width = first.getWidth();
+        int height = first.getHeight();
+        int stackSize = first.getStackSize();
+        int z = first.getNSlices();
+        int t = first.getNFrames();
+        for (ImagePlus input : inputs) {
+            if (input.getWidth() != width || input.getHeight() != height
+                    || input.getStackSize() != stackSize
+                    || input.getNChannels() != 1
+                    || input.getNSlices() != z
+                    || input.getNFrames() != t) {
+                throw new DagRejectedException("Combiner input dimensions differ: " + combiner.id);
+            }
+        }
+
+        ImageStack out = new ImageStack(width, height);
+        for (int s = 1; s <= stackSize; s++) {
+            FloatProcessor fp = new FloatProcessor(width, height);
+            int n = width * height;
+            for (int i = 0; i < n; i++) {
+                fp.setf(i, combinePixel(combiner.op, inputs, s, i));
+            }
+            out.addSlice(first.getStack().getSliceLabel(s), fp);
+        }
+        ImagePlus result = new ImagePlus(combiner.id, out);
+        if (first.getCalibration() != null) result.setCalibration(first.getCalibration().copy());
+        if (z * t == out.getSize()) {
+            result.setDimensions(1, z, t);
+            if (first.isHyperStack()) result.setOpenAsHyperStack(true);
+        }
+        return result;
+    }
+
+    private static float combinePixel(CombinerOp op, List<ImagePlus> inputs, int slice, int index)
+            throws DagRejectedException {
+        float value = inputs.get(0).getStack().getProcessor(slice).getf(index);
+        switch (op) {
+            case AND:
+            case MIN:
+                for (int i = 1; i < inputs.size(); i++) {
+                    value = Math.min(value, inputs.get(i).getStack().getProcessor(slice).getf(index));
+                }
+                return value;
+            case OR:
+            case MAX:
+                for (int i = 1; i < inputs.size(); i++) {
+                    value = Math.max(value, inputs.get(i).getStack().getProcessor(slice).getf(index));
+                }
+                return value;
+            case ADD:
+                for (int i = 1; i < inputs.size(); i++) {
+                    value += inputs.get(i).getStack().getProcessor(slice).getf(index);
+                }
+                return value;
+            case SUBTRACT:
+                for (int i = 1; i < inputs.size(); i++) {
+                    value -= inputs.get(i).getStack().getProcessor(slice).getf(index);
+                }
+                return value;
+            case DIFFERENCE:
+                for (int i = 1; i < inputs.size(); i++) {
+                    value = Math.abs(value - inputs.get(i).getStack().getProcessor(slice).getf(index));
+                }
+                return value;
+            case AVG:
+                for (int i = 1; i < inputs.size(); i++) {
+                    value += inputs.get(i).getStack().getProcessor(slice).getf(index);
+                }
+                return value / inputs.size();
+            default:
+                throw new DagRejectedException("Unsupported combiner op: " + op);
+        }
+    }
+
+    /**
+     * Whole-stack ops are dispatched at the {@link ImagePlus} level — they can
+     * touch slice neighbours (3D filters) or change bit depth (CONVERT_*) and
+     * therefore cannot be run per-slice in parallel.
+     */
+    private static boolean isWholeStackOp(FilterMacroParser.OpType t) {
+        switch (t) {
+            case GAUSSIAN_BLUR_3D:
+            case MEDIAN_3D:
+            case MINIMUM_3D:
+            case CONVERT_8BIT:
+            case CONVERT_16BIT:
+            case CONVERT_32BIT:
+            case THRESHOLD:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    /**
+     * Applies a single parsed operation to all slices in the stack.
+     * Whole-stack ops run once per imp; everything else parallelises across slices.
+     * Thread-safe: uses only ImageProcessor-level APIs with per-call filter instances.
+     */
+    private static void executeOpOnStack(ImagePlus imp, FilterMacroParser.Op op) {
+        if (isWholeStackOp(op.type)) {
+            executeWholeStackOp(imp, op);
+            return;
+        }
+
+        ImageStack stack = imp.getStack();
+        int nSlices = stack.getSize();
+
+        if (nSlices < SLICE_PARALLEL_THRESHOLD || ParallelContext.isNested()) {
+            for (int s = 1; s <= nSlices; s++) {
+                executeOpOnSlice(stack.getProcessor(s), op);
+            }
+            return;
+        }
+
+        int nThreads = Math.min(nSlices, Runtime.getRuntime().availableProcessors());
+        ExecutorService slicePool = Executors.newFixedThreadPool(nThreads);
+        List<Future<?>> futures = new ArrayList<Future<?>>();
+        // Inherit the parent's ParallelContext so any nested FilterExecutor
+        // calls on the slice threads serialise rather than spawning more pools.
+        // We're at the top of the parallel chain here, so enter the flag
+        // unconditionally — child code that recurses will see isNested() == true.
+        for (int s = 1; s <= nSlices; s++) {
+            final ImageProcessor ip = stack.getProcessor(s);
+            futures.add(slicePool.submit(new Runnable() {
+                @Override
+                public void run() {
+                    ParallelContext.enterParallel();
+                    try {
+                        executeOpOnSlice(ip, op);
+                    } finally {
+                        ParallelContext.exitParallel();
+                    }
+                }
+            }));
+        }
+        for (Future<?> f : futures) {
+            try {
+                f.get();
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }
+        slicePool.shutdown();
+    }
+
+    /**
+     * Applies a single parsed operation to one slice's ImageProcessor.
+     * Thread-safe: creates new filter instances per call (no shared mutable state).
+     */
+    private static void executeOpOnSlice(ImageProcessor ip, FilterMacroParser.Op op) {
+        switch (op.type) {
+            case GAUSSIAN_BLUR: {
+                double sigma = op.getParam("sigma");
+                if (Double.isNaN(sigma)) sigma = 2.0;
+                new GaussianBlur().blurGaussian(ip, sigma);
+                break;
+            }
+            case SUBTRACT_BACKGROUND: {
+                double rolling = op.getParam("rolling");
+                if (Double.isNaN(rolling)) rolling = 20.0;
+                // createBackground=false, lightBackground=false, useParaboloid=false,
+                // doPresmooth=true, correctCorners=true
+                new BackgroundSubtracter().rollingBallBackground(
+                        ip, rolling, false, false, false, true, true);
+                break;
+            }
+            case MEDIAN: {
+                double radius = op.getParam("radius");
+                if (Double.isNaN(radius)) radius = 2.0;
+                new RankFilters().rank(ip, radius, RankFilters.MEDIAN);
+                break;
+            }
+            case MEAN: {
+                double radius = op.getParam("radius");
+                if (Double.isNaN(radius)) radius = 2.0;
+                new RankFilters().rank(ip, radius, RankFilters.MEAN);
+                break;
+            }
+            case MINIMUM: {
+                double radius = op.getParam("radius");
+                if (Double.isNaN(radius)) radius = 2.0;
+                new RankFilters().rank(ip, radius, RankFilters.MIN);
+                break;
+            }
+            case MAXIMUM: {
+                double radius = op.getParam("radius");
+                if (Double.isNaN(radius)) radius = 2.0;
+                new RankFilters().rank(ip, radius, RankFilters.MAX);
+                break;
+            }
+            case VARIANCE: {
+                double radius = op.getParam("radius");
+                if (Double.isNaN(radius)) radius = 2.0;
+                new RankFilters().rank(ip, radius, RankFilters.VARIANCE);
+                break;
+            }
+            case UNSHARP_MASK: {
+                double radius = op.getParam("radius");
+                if (Double.isNaN(radius)) radius = 10.0;
+                double weight = op.getParam("mask");
+                if (Double.isNaN(weight)) weight = 0.60;
+                ImageProcessor blurred = ip.duplicate();
+                new GaussianBlur().blurGaussian(blurred, radius);
+                float[] origPixels = ipToFloatArray(ip);
+                float[] blurredPixels = ipToFloatArray(blurred);
+                int size = origPixels.length;
+                for (int i = 0; i < size; i++) {
+                    float v = origPixels[i] + (float)(weight * (origPixels[i] - blurredPixels[i]));
+                    origPixels[i] = Math.max(0, v);
+                }
+                setFromFloatArray(ip, origPixels);
+                break;
+            }
+            case DILATE: {
+                // IJ macro `run("Dilate")` calls Binary plugin with count=1
+                // (default iterations) and background = 255 - foreground,
+                // where foreground depends on Prefs.blackBackground. The bare
+                // ImageProcessor.dilate() shortcut uses count=8 — a far weaker
+                // dilation — so we mirror the macro path explicitly via
+                // ByteProcessor's two-arg dilate.
+                if (ip instanceof ByteProcessor) {
+                    int bg = Prefs.blackBackground ? 0 : 255;
+                    ((ByteProcessor) ip).dilate(1, bg);
+                } else {
+                    ip.dilate();
+                }
+                break;
+            }
+            case ERODE: {
+                if (ip instanceof ByteProcessor) {
+                    int bg = Prefs.blackBackground ? 0 : 255;
+                    ((ByteProcessor) ip).erode(1, bg);
+                } else {
+                    ip.erode();
+                }
+                break;
+            }
+            case OPEN: {
+                // Process > Binary > Open = erode then dilate
+                if (ip instanceof ByteProcessor) {
+                    int bg = Prefs.blackBackground ? 0 : 255;
+                    ((ByteProcessor) ip).erode(1, bg);
+                    ((ByteProcessor) ip).dilate(1, bg);
+                } else {
+                    ip.erode();
+                    ip.dilate();
+                }
+                break;
+            }
+            case CLOSE_: {
+                // Process > Binary > Close- = dilate then erode
+                if (ip instanceof ByteProcessor) {
+                    int bg = Prefs.blackBackground ? 0 : 255;
+                    ((ByteProcessor) ip).dilate(1, bg);
+                    ((ByteProcessor) ip).erode(1, bg);
+                } else {
+                    ip.dilate();
+                    ip.erode();
+                }
+                break;
+            }
+            case FILL_HOLES: {
+                fillHoles(ip);
+                break;
+            }
+            case SKELETONIZE: {
+                if (ip instanceof ByteProcessor) {
+                    int fg = Prefs.blackBackground ? 255 : 0;
+                    new BinaryProcessor((ByteProcessor) ip).skeletonize(fg);
+                }
+                break;
+            }
+            case INVERT: {
+                ip.invert();
+                break;
+            }
+            case ADD: {
+                double v = op.getParam("value");
+                if (!Double.isNaN(v)) ip.add(v);
+                break;
+            }
+            case SUBTRACT: {
+                double v = op.getParam("value");
+                if (!Double.isNaN(v)) ip.subtract(v);
+                break;
+            }
+            case MULTIPLY: {
+                double v = op.getParam("value");
+                if (!Double.isNaN(v)) ip.multiply(v);
+                break;
+            }
+            case DIVIDE: {
+                double v = op.getParam("value");
+                if (!Double.isNaN(v) && v != 0.0) {
+                    // ip.multiply(1/v) drops 32-bit precision in some IJ versions —
+                    // operate per-pixel through the ip's getf/setf for parity.
+                    int n = ip.getWidth() * ip.getHeight();
+                    for (int i = 0; i < n; i++) {
+                        ip.setf(i, (float)(ip.getf(i) / v));
+                    }
+                }
+                break;
+            }
+            case AUTO_LOCAL_THRESHOLD: {
+                applyAutoLocalThreshold(ip, op);
+                break;
+            }
+            case ENHANCE_CONTRAST: {
+                applyEnhanceContrast(ip, op);
+                break;
+            }
+            default:
+                // Whole-stack ops should not reach this method; UNKNOWN never reaches
+                // here either (caller falls back). Be defensive: silently skip.
+                break;
+        }
+    }
+
+    /**
+     * Whole-stack ops (3D filters, bit-depth conversion) operate on the entire
+     * {@link ImagePlus} in one call. They are not parallelised across slices —
+     * the underlying IJ APIs handle the stack coherently.
+     */
+    private static void executeWholeStackOp(ImagePlus imp, FilterMacroParser.Op op) {
+        switch (op.type) {
+            case GAUSSIAN_BLUR_3D: {
+                double sx = op.getParam("x");
+                double sy = op.getParam("y");
+                double sz = op.getParam("z");
+                if (Double.isNaN(sx)) sx = 2.0;
+                if (Double.isNaN(sy)) sy = sx;
+                if (Double.isNaN(sz)) sz = 1.0;
+                GaussianBlur3D.blur(imp, sx, sy, sz);
+                break;
+            }
+            case MEDIAN_3D: {
+                applyFilters3D(imp, op, ij.plugin.Filters3D.MEDIAN);
+                break;
+            }
+            case MINIMUM_3D: {
+                applyFilters3D(imp, op, ij.plugin.Filters3D.MIN);
+                break;
+            }
+            case CONVERT_8BIT: {
+                if (imp.getBitDepth() != 8) {
+                    new ImageConverter(imp).convertToGray8();
+                }
+                break;
+            }
+            case CONVERT_16BIT: {
+                if (imp.getBitDepth() != 16) {
+                    new ImageConverter(imp).convertToGray16();
+                }
+                break;
+            }
+            case CONVERT_32BIT: {
+                if (imp.getBitDepth() != 32) {
+                    new ImageConverter(imp).convertToGray32();
+                }
+                break;
+            }
+            case THRESHOLD: {
+                applyGlobalThreshold(imp, op);
+                break;
+            }
+            default:
+                break;
+        }
+    }
+
+    private static void applyGlobalThreshold(ImagePlus imp, FilterMacroParser.Op op) {
+        String mode = op.getStringParam("mode");
+        double lower;
+        double upper;
+        if ("auto".equals(mode)) {
+            ThresholdWindow window = autoThresholdWindow(imp, op);
+            lower = window.lower;
+            upper = window.upper;
+        } else {
+            lower = op.getParam("lower");
+            upper = op.getParam("upper");
+            if (Double.isNaN(lower)) lower = 0.0;
+            if (Double.isNaN(upper)) upper = 255.0;
+        }
+        applyThresholdMask(imp, lower, upper);
+    }
+
+    private static ThresholdWindow autoThresholdWindow(ImagePlus imp, FilterMacroParser.Op op) {
+        StackRange range = measureStackRange(imp);
+        int[] histogram = buildThresholdHistogram(imp, range);
+        String methodName = op.getStringParam("method");
+        if (methodName == null || methodName.length() == 0) methodName = "Default";
+        int thresholdBin = new AutoThresholder().getThreshold(
+                AutoThresholder.Method.valueOf(methodName),
+                histogram);
+        if (thresholdBin < 0) {
+            return new ThresholdWindow(range.minimum, range.maximum);
+        }
+        boolean dark = "dark".equals(op.getStringParam("background"));
+        if (dark) {
+            return new ThresholdWindow(nativeValueForBin(range, thresholdBin + 1), range.maximum);
+        }
+        return new ThresholdWindow(range.minimum, nativeValueForBin(range, thresholdBin));
+    }
+
+    private static void applyThresholdMask(ImagePlus imp, double lower, double upper) {
+        ImageStack sourceStack = imp.getStack();
+        ImageStack maskStack = new ImageStack(imp.getWidth(), imp.getHeight());
+        for (int s = 1; s <= sourceStack.getSize(); s++) {
+            ImageProcessor source = sourceStack.getProcessor(s);
+            ByteProcessor mask = new ByteProcessor(source.getWidth(), source.getHeight());
+            byte[] pixels = (byte[]) mask.getPixels();
+            for (int i = 0; i < pixels.length; i++) {
+                double value = source.getf(i);
+                if (isFinite(value) && value >= lower && value <= upper) {
+                    pixels[i] = (byte) 255;
+                }
+            }
+            maskStack.addSlice(sourceStack.getSliceLabel(s), mask);
+        }
+        int channels = Math.max(1, imp.getNChannels());
+        int slices = Math.max(1, imp.getNSlices());
+        int frames = Math.max(1, imp.getNFrames());
+        Calibration calibration = copyCalibration(imp);
+        imp.setStack(maskStack);
+        if (channels * slices * frames == maskStack.getSize()) {
+            imp.setDimensions(channels, slices, frames);
+            if (channels > 1 || slices > 1 || frames > 1) {
+                imp.setOpenAsHyperStack(true);
+            }
+        }
+        if (calibration != null) {
+            imp.setCalibration(calibration);
+        }
+    }
+
+    private static StackRange measureStackRange(ImagePlus imp) {
+        ImageStack stack = imp.getStack();
+        double minimum = Double.POSITIVE_INFINITY;
+        double maximum = Double.NEGATIVE_INFINITY;
+        for (int s = 1; s <= stack.getSize(); s++) {
+            ImageProcessor processor = stack.getProcessor(s);
+            int size = processor.getWidth() * processor.getHeight();
+            for (int i = 0; i < size; i++) {
+                double value = processor.getf(i);
+                if (isFinite(value)) {
+                    if (value < minimum) minimum = value;
+                    if (value > maximum) maximum = value;
+                }
+            }
+        }
+        if (minimum == Double.POSITIVE_INFINITY || maximum == Double.NEGATIVE_INFINITY) {
+            return new StackRange(0.0, 0.0);
+        }
+        return new StackRange(minimum, maximum);
+    }
+
+    private static int[] buildThresholdHistogram(ImagePlus imp, StackRange range) {
+        int[] histogram = new int[256];
+        ImageStack stack = imp.getStack();
+        for (int s = 1; s <= stack.getSize(); s++) {
+            ImageProcessor processor = stack.getProcessor(s);
+            int size = processor.getWidth() * processor.getHeight();
+            for (int i = 0; i < size; i++) {
+                double value = processor.getf(i);
+                if (isFinite(value)) {
+                    histogram[binFor(value, range)]++;
+                }
+            }
+        }
+        return histogram;
+    }
+
+    private static int binFor(double value, StackRange range) {
+        if (range.maximum <= range.minimum) {
+            return 0;
+        }
+        int bin = (int) Math.floor((value - range.minimum) * 255.0
+                / (range.maximum - range.minimum));
+        if (bin < 0) return 0;
+        if (bin > 255) return 255;
+        return bin;
+    }
+
+    private static double nativeValueForBin(StackRange range, int bin) {
+        if (range.maximum <= range.minimum) {
+            return range.minimum;
+        }
+        if (bin <= 0) {
+            return range.minimum;
+        }
+        if (bin >= 255) {
+            return range.maximum;
+        }
+        return range.minimum + (range.maximum - range.minimum) * bin / 255.0;
+    }
+
+    private static void applyFilters3D(ImagePlus imp, FilterMacroParser.Op op, int filter) {
+        double dx = op.getParam("x");
+        double dy = op.getParam("y");
+        double dz = op.getParam("z");
+        if (Double.isNaN(dx)) dx = 2.0;
+        if (Double.isNaN(dy)) dy = dx;
+        if (Double.isNaN(dz)) dz = 1.0;
+        ImageStack out = ij.plugin.Filters3D.filter(
+                imp.getStack(), filter, (float) dx, (float) dy, (float) dz);
+        if (out != null) imp.setStack(out);
+    }
+
+    /**
+     * Auto Local Threshold (Fiji plugin). Uses reflection so the project compiles
+     * even when {@code fiji.threshold.Auto_Local_Threshold} is not on the build
+     * classpath; at Fiji runtime it is always present.
+     */
+    private static void applyAutoLocalThreshold(ImageProcessor ip, FilterMacroParser.Op op) {
+        if (!(ip instanceof ByteProcessor)) {
+            // Auto Local Threshold runs on 8-bit images. Skip silently for other
+            // bit depths — the caller is expected to convert first (the bundled
+            // Puncta Resolve macro does run("8-bit") immediately before).
+            return;
+        }
+        String method = op.getStringParam("method");
+        if (method == null) method = "Bernsen";
+        double radius = op.getParam("radius");
+        if (Double.isNaN(radius)) radius = 15.0;
+        double p1 = op.getParam("parameter_1");
+        if (Double.isNaN(p1)) p1 = 0.0;
+        double p2 = op.getParam("parameter_2");
+        if (Double.isNaN(p2)) p2 = 0.0;
+        boolean white = op.hasFlag("white");
+
+        try {
+            Class<?> cls = Class.forName("fiji.threshold.Auto_Local_Threshold");
+            Object inst = cls.getDeclaredConstructor().newInstance();
+            // Public signature in fiji.threshold.Auto_Local_Threshold:
+            //   Object[] exec(ImagePlus imp, String method, int radius,
+            //                 double par1, double par2, boolean doIwhite)
+            ImagePlus tmp = new ImagePlus("alt-tmp", ip);
+            cls.getMethod("exec",
+                    ImagePlus.class, String.class, int.class,
+                    double.class, double.class, boolean.class)
+                    .invoke(inst, tmp, method, (int) radius, p1, p2, white);
+        } catch (ClassNotFoundException notFound) {
+            // Plugin not available — leave the slice unchanged. This only happens
+            // outside Fiji (unit tests without the auto-local-threshold jar).
+        } catch (Exception e) {
+            throw new RuntimeException("Auto Local Threshold native execution failed", e);
+        }
+    }
+
+    /**
+     * Histogram normalisation matching {@code run("Enhance Contrast...", "saturated=N normalize ...")}.
+     * Uses {@link ContrastEnhancer#stretchHistogram(ImageProcessor, double)} with
+     * the {@code normalize} field set when present in the args.
+     */
+    private static void applyEnhanceContrast(ImageProcessor ip, FilterMacroParser.Op op) {
+        if (ip instanceof ColorProcessor) return;
+        double saturated = op.getParam("saturated");
+        if (Double.isNaN(saturated)) saturated = 0.35;
+        boolean normalize = op.hasFlag("normalize");
+        boolean equalize = op.hasFlag("equalize");
+
+        ContrastEnhancer ce = new ContrastEnhancer();
+        // ContrastEnhancer fields differ in visibility across IJ versions —
+        // reflectively assign the ones we recognise so we do not depend on
+        // a particular accessor surface.
+        setFieldIfExists(ce, "normalize", normalize);
+        setFieldIfExists(ce, "equalize",  equalize);
+        setFieldIfExists(ce, "useStackHistogram", false);
+        setFieldIfExists(ce, "processStack", false);
+        ce.stretchHistogram(ip, saturated);
+    }
+
+    private static void setFieldIfExists(Object target, String name, boolean value) {
+        try {
+            Field f = target.getClass().getDeclaredField(name);
+            f.setAccessible(true);
+            f.setBoolean(target, value);
+        } catch (NoSuchFieldException ignored) {
+            // Field not present in this IJ version — caller's default applies.
+        } catch (Exception e) {
+            // Reflection failure is non-fatal; native fallback uses ImageJ defaults.
+        }
+    }
+
+    /**
+     * Process > Binary > Fill Holes. Runs on 8-bit only; respects
+     * {@link Prefs#blackBackground} for foreground/background colour.
+     */
+    private static void fillHoles(ImageProcessor ip) {
+        if (!(ip instanceof ByteProcessor)) return;
+        int width = ip.getWidth();
+        int height = ip.getHeight();
+        byte[] pixels = (byte[]) ip.getPixels();
+        int n = width * height;
+
+        int foreground = Prefs.blackBackground ? 255 : 0;
+        int background = 255 - foreground;
+
+        boolean[] reached = new boolean[n];
+        Deque<Integer> queue = new ArrayDeque<Integer>();
+
+        for (int x = 0; x < width; x++) {
+            int top = x;
+            int bot = (height - 1) * width + x;
+            if ((pixels[top] & 0xff) == background && !reached[top]) {
+                reached[top] = true; queue.add(top);
+            }
+            if ((pixels[bot] & 0xff) == background && !reached[bot]) {
+                reached[bot] = true; queue.add(bot);
+            }
+        }
+        for (int y = 0; y < height; y++) {
+            int left = y * width;
+            int right = y * width + width - 1;
+            if ((pixels[left] & 0xff) == background && !reached[left]) {
+                reached[left] = true; queue.add(left);
+            }
+            if ((pixels[right] & 0xff) == background && !reached[right]) {
+                reached[right] = true; queue.add(right);
+            }
+        }
+
+        while (!queue.isEmpty()) {
+            int idx = queue.poll();
+            int y = idx / width;
+            int x = idx % width;
+            if (x > 0)            tryEnqueue(pixels, reached, queue, idx - 1, background);
+            if (x < width - 1)    tryEnqueue(pixels, reached, queue, idx + 1, background);
+            if (y > 0)            tryEnqueue(pixels, reached, queue, idx - width, background);
+            if (y < height - 1)   tryEnqueue(pixels, reached, queue, idx + width, background);
+        }
+
+        for (int i = 0; i < n; i++) {
+            if (!reached[i] && (pixels[i] & 0xff) == background) {
+                pixels[i] = (byte) foreground;
+            }
+        }
+    }
+
+    private static void tryEnqueue(byte[] pixels, boolean[] reached,
+                                   Deque<Integer> queue, int idx, int background) {
+        if (reached[idx]) return;
+        if ((pixels[idx] & 0xff) != background) return;
+        reached[idx] = true;
+        queue.add(idx);
+    }
+
+    private static float[] ipToFloatArray(ImageProcessor ip) {
+        int w = ip.getWidth();
+        int h = ip.getHeight();
+        float[] result = new float[w * h];
+        for (int i = 0; i < result.length; i++) {
+            result[i] = ip.getf(i);
+        }
+        return result;
+    }
+
+    private static void setFromFloatArray(ImageProcessor ip, float[] values) {
+        for (int i = 0; i < values.length; i++) {
+            ip.setf(i, values[i]);
+        }
+    }
+
+    private static boolean isFinite(double value) {
+        return !Double.isNaN(value) && !Double.isInfinite(value);
+    }
+
+    /**
+     * Closes the image window safely, removing it from WindowManager.
+     * Pixel data is preserved — ImagePlus.close() does not call flush().
+     * Safe to call when the window is null (no-op).
+     */
+    private static void closeWindowSafely(ImagePlus imp) {
+        if (imp != null && imp.getWindow() != null) {
+            imp.changes = false;
+            imp.hide();
+        }
+    }
+
+    private static final class StackRange {
+        final double minimum;
+        final double maximum;
+
+        StackRange(double minimum, double maximum) {
+            this.minimum = minimum;
+            this.maximum = maximum;
+        }
+    }
+
+    private static final class ThresholdWindow {
+        final double lower;
+        final double upper;
+
+        ThresholdWindow(double lower, double upper) {
+            this.lower = lower;
+            this.upper = upper;
+        }
+    }
+}

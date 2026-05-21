@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+        http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>org.scijava</groupId>
+        <artifactId>pom-scijava</artifactId>
+        <version>31.1.0</version>
+        <relativePath/>
+    </parent>
+
+    <groupId>io.github.jay2owe</groupId>
+    <artifactId>macro-builder</artifactId>
+    <version>0.2.1</version>
+
+    <name>Macro Builder</name>
+    <description>Standalone ImageJ/Fiji plugin for building filter macros from a single image or stack.</description>
+    <url>https://github.com/Jay2owe/Macro-Builder</url>
+    <inceptionYear>2026</inceptionYear>
+    <organization>
+        <name>UK Dementia Research Institute at Imperial College London</name>
+        <url>https://ukdri.ac.uk/centres/imperial</url>
+    </organization>
+
+    <properties>
+        <main-class>macro.builder.Macro_Builder</main-class>
+        <license.licenseName>bsd_3</license.licenseName>
+        <license.copyrightOwners>Jamie Malcolm</license.copyrightOwners>
+    </properties>
+
+    <licenses>
+        <license>
+            <name>BSD 3-Clause License</name>
+            <url>https://opensource.org/licenses/BSD-3-Clause</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+
+    <developers>
+        <developer>
+            <id>Jay2owe</id>
+            <name>Jamie Malcolm</name>
+            <email>jamiemalcolm12@gmail.com</email>
+            <url>https://github.com/Jay2owe</url>
+            <organization>UK Dementia Research Institute at Imperial College London</organization>
+            <organizationUrl>https://www.ukdri.ac.uk/labs/brancaccio-lab</organizationUrl>
+            <properties>
+                <orcid>0009-0008-3862-2776</orcid>
+            </properties>
+            <roles>
+                <role>founder</role>
+                <role>lead</role>
+                <role>developer</role>
+                <role>maintainer</role>
+            </roles>
+        </developer>
+    </developers>
+
+    <contributors>
+        <contributor>
+            <name>Brancaccio Lab</name>
+            <organization>UK Dementia Research Institute at Imperial College London</organization>
+            <organizationUrl>https://www.ukdri.ac.uk/labs/brancaccio-lab</organizationUrl>
+            <roles>
+                <role>reviewer</role>
+                <role>support</role>
+            </roles>
+        </contributor>
+    </contributors>
+
+    <scm>
+        <connection>scm:git:https://github.com/Jay2owe/Macro-Builder.git</connection>
+        <developerConnection>scm:git:git@github.com:Jay2owe/Macro-Builder.git</developerConnection>
+        <tag>HEAD</tag>
+        <url>https://github.com/Jay2owe/Macro-Builder</url>
+    </scm>
+
+    <issueManagement>
+        <system>GitHub Issues</system>
+        <url>https://github.com/Jay2owe/Macro-Builder/issues</url>
+    </issueManagement>
+
+    <mailingLists>
+        <mailingList>
+            <name>Macro Builder issue tracker</name>
+            <post>https://github.com/Jay2owe/Macro-Builder/issues/new</post>
+            <archive>https://github.com/Jay2owe/Macro-Builder/issues</archive>
+        </mailingList>
+    </mailingLists>
+
+    <ciManagement>
+        <system>GitHub Actions</system>
+        <url>https://github.com/Jay2owe/Macro-Builder/actions</url>
+    </ciManagement>
+
+    <repositories>
+        <repository>
+            <id>scijava.public</id>
+            <url>https://maven.scijava.org/content/groups/public</url>
+        </repository>
+    </repositories>
+
+    <dependencies>
+        <dependency>
+            <groupId>net.imagej</groupId>
+            <artifactId>ij</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>junit</groupId>
+            <artifactId>junit</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <finalName>Macro_Builder-${project.version}</finalName>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <configuration>
+                    <excludes>
+                        <exclude>META-INF/maven/**</exclude>
+                    </excludes>
+                    <archive>
+                        <addMavenDescriptor>false</addMavenDescriptor>
+                        <manifest>
+                            <addClasspath>false</addClasspath>
+                        </manifest>
+                        <manifestEntries>
+                            <Implementation-Version>${project.version}</Implementation-Version>
+                        </manifestEntries>
+                    </archive>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>0.8.13</version>
+            </plugin>
+        </plugins>
+    </build>
+</project>

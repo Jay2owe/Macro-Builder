@@ -1,0 +1,123 @@
+name: Upload To Fiji Update Site
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Simulate the updater upload without changing the update site"
+        required: true
+        type: boolean
+        default: true
+      clear_stale_lock:
+        description: "Delete db.xml.gz.lock before upload using the WebDAV credentials"
+        required: true
+        type: boolean
+        default: false
+
+concurrency:
+  group: macro-builder-update-site-upload
+  cancel-in-progress: false
+
+jobs:
+  upload:
+    name: Build and upload
+    runs-on: ubuntu-latest
+    environment: fiji-update-site
+
+    env:
+      IMAGEJ_UPDATE_SITE_NAME: Macro-Builder
+      IMAGEJ_UPDATE_SITE_URL: https://sites.imagej.net/Macro-Builder/
+      IMAGEJ_UPLOAD_USER: ${{ secrets.IMAGEJ_UPLOAD_USER }}
+      IMAGEJ_UPLOAD_PASSWORD: ${{ secrets.IMAGEJ_UPLOAD_PASSWORD }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set default upload user
+        shell: bash
+        run: |
+          if [ -z "$IMAGEJ_UPLOAD_USER" ]; then
+            echo "IMAGEJ_UPLOAD_USER=Jay2owe" >> "$GITHUB_ENV"
+          fi
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "8"
+          cache: maven
+
+      - name: Validate secrets
+        shell: bash
+        run: |
+          test -n "$IMAGEJ_UPLOAD_PASSWORD" || {
+            echo "Missing repository secret: IMAGEJ_UPLOAD_PASSWORD"
+            exit 1
+          }
+
+      - name: Build and test
+        run: ./mvnw clean test
+
+      - name: Build plugin jar
+        run: ./mvnw clean -DskipTests package
+
+      - name: Download Fiji
+        shell: bash
+        run: |
+          curl -fsSL https://downloads.imagej.net/fiji/latest/fiji-latest-linux64-jdk.zip -o fiji-linux64.zip
+          unzip -q fiji-linux64.zip
+          FIJI_DIR="$(find . -maxdepth 5 -type f \( -name "ImageJ*linux64*" -o -name "ImageJ2*linux64*" -o -name "fiji-linux-x64" \) -printf "%h\n" | head -n 1)"
+          if [ -z "$FIJI_DIR" ]; then
+            FIJI_DIR="$(find . -maxdepth 4 -type d -name "*.app" -print -quit)"
+          fi
+          if [ -z "$FIJI_DIR" ]; then
+            echo "Could not locate extracted Fiji/ImageJ directory."
+            unzip -Z1 fiji-linux64.zip | head -n 80
+            exit 1
+          fi
+          if [ "$FIJI_DIR" != "./Fiji.app" ]; then
+            mv "$FIJI_DIR" ./Fiji.app
+          fi
+          find Fiji.app -maxdepth 2 -type f \( -name "ImageJ*linux64*" -o -name "ImageJ2*linux64*" -o -name "fiji-linux-x64" \) -print
+
+      - name: Clear stale remote lock
+        if: ${{ inputs.clear_stale_lock }}
+        shell: pwsh
+        run: |
+          ./scripts/clear-update-site-lock.ps1 `
+            -SiteUrl "$env:IMAGEJ_UPDATE_SITE_URL" `
+            -Username "$env:IMAGEJ_UPLOAD_USER"
+
+      - name: Require no remote lock
+        shell: pwsh
+        run: |
+          ./scripts/clear-update-site-lock.ps1 `
+            -SiteUrl "$env:IMAGEJ_UPDATE_SITE_URL" `
+            -Username "$env:IMAGEJ_UPLOAD_USER" `
+            -RequireAbsent
+
+      - name: Upload to Fiji update site
+        shell: pwsh
+        run: |
+          $dryRun = "${{ inputs.dry_run }}" -eq "true"
+          $uploadArgs = @{
+            FijiDir = "Fiji.app"
+            SiteName = "$env:IMAGEJ_UPDATE_SITE_NAME"
+            SiteUrl = "$env:IMAGEJ_UPDATE_SITE_URL"
+            Username = "$env:IMAGEJ_UPLOAD_USER"
+          }
+          if ($dryRun) {
+            $uploadArgs.DryRun = $true
+          }
+          ./scripts/upload-to-fiji-update-site.ps1 @uploadArgs
+
+      - name: Upload built jar artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macro-builder-uploaded-jar
+          path: |
+            target/Macro_Builder-*.jar
+            !target/*-sources.jar
+            !target/*-tests.jar
+          if-no-files-found: error

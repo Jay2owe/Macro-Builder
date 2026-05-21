@@ -1,0 +1,26 @@
+{
+  "title": "Macro Builder: GUI-driven ImageJ macro construction and batch runner",
+  "upload_type": "software",
+  "license": "BSD-3-Clause",
+  "creators": [
+    {
+      "name": "Malcolm, Jamie",
+      "orcid": "0009-0008-3862-2776",
+      "affiliation": "UK Dementia Research Institute at Imperial College London"
+    }
+  ],
+  "keywords": [
+    "fiji",
+    "imagej",
+    "microscopy",
+    "macro",
+    "batch-processing"
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "https://github.com/Jay2owe/Macro-Builder",
+      "relation": "isSupplementTo",
+      "resource_type": "software"
+    }
+  ]
+}

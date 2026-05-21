@@ -1,0 +1,47 @@
+name: GitHub Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build release jar
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "8"
+          cache: maven
+
+      - name: Build plugin jar
+        run: ./mvnw clean package
+
+      - name: Stage uploadable jar
+        shell: bash
+        run: |
+          mkdir -p release-dist
+          mapfile -t jars < <(find target -maxdepth 1 -type f -name 'Macro_Builder-*.jar' ! -name '*-sources.jar' ! -name '*-tests.jar' | sort)
+          if [ "${#jars[@]}" -ne 1 ]; then
+            printf 'Expected exactly one uploadable Macro Builder jar, found %s:\n' "${#jars[@]}"
+            printf '%s\n' "${jars[@]}"
+            exit 1
+          fi
+          cp "${jars[0]}" release-dist/
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-dist/*.jar
+          generate_release_notes: true

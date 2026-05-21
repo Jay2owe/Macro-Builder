@@ -63,7 +63,7 @@ public final class MacroOptionsParser {
     }
 
     public static String normalizePath(File file) {
-        return file.getAbsolutePath().replace(File.separatorChar, '/');
+        return file.getAbsolutePath().replace(File.separatorChar, '/').replace('\\', '/');
     }
 
     private static Set<String> tokens(String options) {

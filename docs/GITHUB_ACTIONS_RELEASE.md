@@ -42,6 +42,7 @@ Add a required reviewer for that environment. This makes accidental update-site 
 3. Click `Run workflow`.
 4. Leave `dry_run` enabled.
 5. Leave `clear_stale_lock` disabled unless the site is currently locked.
+6. Leave `confirm_live_upload` empty.
 
 The dry run builds the jar and asks Fiji's updater to simulate the upload.
 
@@ -53,6 +54,11 @@ The dry run builds the jar and asks Fiji's updater to simulate the upload.
 4. Click `Run workflow`.
 5. Set `dry_run` to `false`.
 6. Set `clear_stale_lock` to `true` only if a previous failed upload left `db.xml.gz.lock`.
+7. Set `confirm_live_upload` exactly to:
+
+```text
+UPLOAD Macro-Builder
+```
 
 The workflow uploads only:
 

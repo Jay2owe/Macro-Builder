@@ -13,6 +13,11 @@ on:
         required: true
         type: boolean
         default: false
+      confirm_live_upload:
+        description: "Required when dry_run=false: type UPLOAD Macro-Builder"
+        required: false
+        type: string
+        default: ""
 
 concurrency:
   group: macro-builder-update-site-upload
@@ -55,6 +60,14 @@ jobs:
             echo "Missing repository secret: IMAGEJ_UPLOAD_PASSWORD"
             exit 1
           }
+
+      - name: Require live upload confirmation
+        shell: bash
+        run: |
+          if [ "${{ inputs.dry_run }}" != "true" ] && [ "${{ inputs.confirm_live_upload }}" != "UPLOAD Macro-Builder" ]; then
+            echo "Live update-site upload blocked. Re-run with confirm_live_upload set to: UPLOAD Macro-Builder"
+            exit 1
+          fi
 
       - name: Build and test
         run: ./mvnw clean test

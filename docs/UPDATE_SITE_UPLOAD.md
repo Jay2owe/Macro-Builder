@@ -93,6 +93,7 @@ Use the manual GitHub Actions workflow when possible:
 1. Open GitHub Actions in the public repository.
 2. Run `Upload To Fiji Update Site`.
 3. Keep `dry_run=true` for a simulation, or set `dry_run=false` for a real upload.
+4. For a real upload, set `confirm_live_upload` exactly to `UPLOAD Macro-Builder`.
 
 See [GitHub Actions release automation](GITHUB_ACTIONS_RELEASE.md).
 

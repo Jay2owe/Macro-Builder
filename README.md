@@ -196,16 +196,11 @@ Restart Fiji after copying the jar.
 - [GitHub Actions release automation](docs/GITHUB_ACTIONS_RELEASE.md)
 - [Changelog](CHANGELOG.md)
 
-## Citing Macro Builder
-
-If you use Macro Builder in published work, please cite it. Citation metadata is in [`CITATION.cff`](CITATION.cff) (use GitHub's "Cite this repository" button). A Zenodo DOI will be added here once a tagged release is archived.
-
-Macro Builder is built on Fiji/ImageJ and Bio-Formats. When describing analyses that depend on those platforms, cite the relevant upstream tools as well, for example ImageJ (Schneider et al., 2012), Fiji (Schindelin et al., 2012), ImageJ2/SciJava (Rueden et al., 2017), and Bio-Formats (Linkert et al., 2010).
-
 ## Citation
 
-If you use Macro Builder in published work, please cite it. The **concept DOI** below
-always resolves to the latest release:
+If you use Macro Builder in published work, please cite it. Citation metadata is in
+[`CITATION.cff`](CITATION.cff) (use GitHub's "Cite this repository" button). The
+**concept DOI** below always resolves to the latest release:
 
 > Malcolm, J. (2026). *Macro Builder: GUI-driven ImageJ macro construction and batch runner* (Version 0.2.2) [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.21633369
 
@@ -223,6 +218,11 @@ always resolves to the latest release:
 
 Where exact reproducibility matters, cite the DOI of the specific version you
 ran instead — v0.2.2 is [`10.5281/zenodo.21633370`](https://doi.org/10.5281/zenodo.21633370).
+
+Macro Builder is built on Fiji/ImageJ and Bio-Formats. When describing analyses that
+depend on those platforms, cite the relevant upstream tools as well, for example ImageJ
+(Schneider et al., 2012), Fiji (Schindelin et al., 2012), ImageJ2/SciJava (Rueden et al.,
+2017), and Bio-Formats (Linkert et al., 2010).
 
 GitHub's **Cite this repository** button (top right, generated from
 [`CITATION.cff`](CITATION.cff)) produces both APA and BibTeX automatically.

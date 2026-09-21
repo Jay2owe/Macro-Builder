@@ -200,9 +200,10 @@ Restart Fiji after copying the jar.
 
 If you use Macro Builder in published work, please cite it. Citation metadata is in
 [`CITATION.cff`](CITATION.cff) (use GitHub's "Cite this repository" button). The
-**concept DOI** below always resolves to the latest release:
+**concept DOI** in the badge above always resolves to the latest release.
+For this exact version, cite:
 
-> Malcolm, J. (2026). *Macro Builder: GUI-driven ImageJ macro construction and batch runner* (Version 0.2.6) [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.21633369
+> Malcolm, J. (2026). *Macro Builder: GUI-driven ImageJ macro construction and batch runner* (Version 0.2.6) [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.22881610
 
 ```bibtex
 @software{malcolm_macrobuilder_2026,
@@ -211,13 +212,13 @@ If you use Macro Builder in published work, please cite it. Citation metadata is
   version   = {0.2.6},
   year      = {2026},
   publisher = {Zenodo},
-  doi       = {10.5281/zenodo.21633369},
-  url       = {https://doi.org/10.5281/zenodo.21633369}
+  doi       = {10.5281/zenodo.22881610},
+  url       = {https://doi.org/10.5281/zenodo.22881610}
 }
 ```
 
 Where exact reproducibility matters, cite the DOI of the specific version you
-ran instead — v0.2.6 is the current local deployment build; the previous published version, v0.2.2, is [`10.5281/zenodo.21633370`](https://doi.org/10.5281/zenodo.21633370).
+ran instead — v0.2.6 is [`10.5281/zenodo.22881610`](https://doi.org/10.5281/zenodo.22881610); the previous published version, v0.2.2, is [`10.5281/zenodo.21633370`](https://doi.org/10.5281/zenodo.21633370).
 
 Macro Builder is built on Fiji/ImageJ and Bio-Formats. When describing analyses that
 depend on those platforms, cite the relevant upstream tools as well, for example ImageJ

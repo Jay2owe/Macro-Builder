@@ -1422,11 +1422,12 @@ public class Macro_Builder implements PlugIn {
             if (imp == null) return;
             try {
                 imp.changes = false;
-                if (imp.getWindow() != null) {
-                    imp.close();
-                } else {
-                    imp.flush();
-                }
+                // Recorder probing creates an unshown temporary ImagePlus.
+                // flush() releases pixels but leaves that image as ImageJ's
+                // current temporary image, so close() must run first even
+                // when there is no ImageWindow.
+                imp.close();
+                imp.flush();
             } catch (Throwable ignored) {
             }
         }

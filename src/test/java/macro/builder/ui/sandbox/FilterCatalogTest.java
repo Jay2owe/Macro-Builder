@@ -56,6 +56,15 @@ public class FilterCatalogTest {
     }
 
     @Test
+    public void keepsImageJCommandSuffixForExecutionButHidesItInTheLabel() {
+        FilterCatalog.Entry entry = FilterCatalog.Entry.legacy(
+                "Analyze", "Analyze Particles...", "Analyze > Analyze Particles...");
+
+        assertEquals("Analyze Particles", entry.label);
+        assertEquals("Analyze Particles...", entry.commandName);
+    }
+
+    @Test
     public void catalogGroupsPluginCommandsFromPluginsMenu() {
         FilterCatalog catalog = new FilterCatalog(Collections.singletonList(
                 FilterCatalog.Entry.legacy("Tier 2", "Lab Plugin Filter",

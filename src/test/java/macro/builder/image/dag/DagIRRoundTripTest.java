@@ -99,6 +99,21 @@ public class DagIRRoundTripTest {
     }
 
     @Test
+    public void emitsLegacyCommandWithImageJCommandSuffix() {
+        DagIR dag = new DagIR(1, 1,
+                Collections.singletonList(new DagLine("line_A",
+                        Collections.singletonList(new DagNode(
+                                "node_1", OpType.UNKNOWN, "size=10-20",
+                                "Analyze Particles...", "Analyze > Analyze Particles...")), 1)),
+                Collections.<Combiner>emptyList(),
+                "line_A", "legacy");
+
+        String ijm = DagToIjmEmitter.emit(dag);
+
+        assertTrue(ijm.indexOf("run(\"Analyze Particles...\", \"size=10-20\");") >= 0);
+    }
+
+    @Test
     public void readableIjmForSimpleLinearFilterOmitsInternalScaffolding() {
         DagLine line = new DagLine("line_A",
                 Arrays.asList(

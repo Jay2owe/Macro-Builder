@@ -2,7 +2,6 @@ cff-version: 1.2.0
 message: "If you use Macro Builder in published work, please cite it as below."
 type: software
 title: "Macro Builder: GUI-driven ImageJ macro construction and batch runner"
-doi: "10.5281/zenodo.21633369"
 abstract: >-
   Standalone Fiji/ImageJ plugin for building ImageJ macro (.ijm) filter
   pipelines from a single image, stack, or multi-channel hyperstack.
@@ -18,8 +17,8 @@ authors:
 repository-code: "https://github.com/Jay2owe/Macro-Builder"
 url: "https://github.com/Jay2owe/Macro-Builder"
 license: BSD-3-Clause
-version: "0.2.2"
-date-released: "2026-07-27"
+version: "0.2.6"
+date-released: "2026-09-21"
 keywords:
   - fiji
   - imagej

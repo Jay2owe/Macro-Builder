@@ -1,0 +1,221 @@
+schema_version: 1
+id: macro-builder-legacy-command
+name: Add and open a legacy ImageJ command
+description: >
+  Opens Macro Builder, searches the catalog for Convolve..., adds it with a
+  real mouse click, and accepts both the command dialog and the parameter
+  editor so the legacy step is stored in the builder.
+
+requires:
+  test_automation: true
+  physical_input: true
+  plugin_under_test: true
+  plugin: Macro Builder
+  menu_path: [Plugins, Macro Builder, Macro Builder]
+
+policy:
+  allow_risks: [read_only, reversible, mutating]
+  allow_labels: ["Macro Builder", "Build Macro", "+", "Cancel", "OK", "Discard changes"]
+  allow_write_roots: [exports]
+  allow_legacy_selectors: false
+  reviewer: harness
+  reason: >
+    The scenario uses one synthetic image in a disposable Fiji instance and
+    accepts the legacy step without writing files. The harness reports this
+    filtered row's Swing coordinates in logical space while the physical
+    display is scaled, so the inspected button position is addressed as a
+    window-relative mouse point and verified by the command dialog result.
+
+performance:
+  warmup_runs: 0
+  measured_runs: 1
+  budget_first_feedback_ms: 1000
+  budget_completion_ms: 5000
+  mode: audit
+
+setup:
+  - id: fixture_image
+    name: create the synthetic input image
+    action: run_macro
+    risk: mutating
+    macro: |
+      newImage("harness_macro_builder_fixture", "8-bit ramp", 256, 256, 1);
+    expect:
+      first_feedback:
+        within_ms: 2000
+        any_of: [window_appeared, image_revision_changed]
+      completion:
+        within_ms: 10000
+        console_errors: absent
+
+steps:
+  - id: open_macro_builder
+    name: open Plugins > Macro Builder > Macro Builder
+    action: physical_menu
+    risk: mutating
+    window: {title: "(Fiji Is Just) ImageJ", match: contains}
+    menu_path: [Plugins, Macro Builder, Macro Builder]
+    expect:
+      dispatch: {visible: true, enabled: true, exactly_once: true}
+      first_feedback:
+        within_ms: 1500
+        any_of: [window_appeared, focus_changed]
+      completion:
+        within_ms: 8000
+        window_present: Macro Builder
+        unexpected_modal: false
+        console_errors: absent
+
+  - id: inspect_macro_builder
+    name: inspect the Macro Builder controls
+    action: inspect_ui
+    risk: read_only
+    window: {title: Macro Builder, match: exact}
+
+  - id: open_visual_builder
+    name: open the visual macro builder
+    action: physical_click
+    risk: mutating
+    window: {title: Macro Builder, match: exact}
+    component: {role: button, name: "Build Macro", match: exact}
+    expect:
+      dispatch: {visible: true, enabled: true, exactly_once: true}
+      first_feedback:
+        within_ms: 5000
+        any_of: [window_appeared, focus_changed]
+      completion:
+        within_ms: 8000
+        window_present: "Filter Builder - Standalone image"
+        unexpected_modal: false
+        console_errors: absent
+
+  - id: inspect_visual_builder
+    name: inspect the catalog controls before searching
+    action: inspect_ui
+    risk: read_only
+    window: {title: "Filter Builder - Standalone image", match: exact}
+
+  - id: search_legacy_command
+    name: search for the legacy Convolve command
+    action: semantic_set_value
+    risk: mutating
+    window: {title: "Filter Builder - Standalone image", match: exact}
+    component: {role: text_field}
+    value: "Convolve"
+    expect:
+      dispatch: {visible: true, enabled: true, exactly_once: true}
+      first_feedback:
+        within_ms: 1500
+        any_of: [value_changed]
+      completion:
+        within_ms: 3000
+        unexpected_modal: false
+
+  - id: inspect_legacy_result
+    name: inspect the filtered legacy command row
+    action: inspect_ui
+    risk: read_only
+    window: {title: "Filter Builder - Standalone image", match: exact}
+
+  - id: add_legacy_command
+    name: add the filtered legacy command
+    action: physical_click
+    risk: mutating
+    measured: true
+    window: {title: "Filter Builder - Standalone image", match: exact}
+    relative: [0.80, 0.26]
+    expect:
+      dispatch: {visible: true, enabled: true, exactly_once: true}
+      first_feedback:
+        within_ms: 1500
+        any_of: [window_appeared, focus_changed]
+      completion:
+        within_ms: 8000
+        window_present: "Convolver..."
+        unexpected_modal: false
+        console_errors: absent
+    assertions:
+      - kind: window_present
+        title: "Convolver..."
+      - kind: no_uncaught_exceptions
+
+teardown:
+  - id: accept_legacy_dialog
+    name: accept the legacy command dialog
+    action: physical_click
+    risk: mutating
+    window: {title: "Convolver...", match: exact}
+    component: {role: button, name: OK, match: exact}
+    expect:
+      dispatch: {visible: true, enabled: true, exactly_once: true}
+      first_feedback:
+        within_ms: 1500
+        any_of: [window_closed]
+      completion:
+        within_ms: 5000
+        window_absent: "Convolver..."
+        window_present: "Edit parameters"
+        unexpected_modal: false
+
+  - id: accept_legacy_parameters
+    name: accept the recorded legacy parameters
+    action: physical_click
+    risk: mutating
+    window: {title: "Edit parameters", match: exact}
+    component: {role: button, name: OK, match: exact}
+    expect:
+      dispatch: {visible: true, enabled: true, exactly_once: true}
+      first_feedback:
+        within_ms: 1500
+        any_of: [window_closed]
+      completion:
+        within_ms: 5000
+        window_absent: "Edit parameters"
+        unexpected_modal: false
+        console_errors: absent
+
+  - id: cancel_builder
+    name: cancel the modified builder
+    action: physical_click
+    risk: reversible
+    window: {title: "Filter Builder - Standalone image", match: exact}
+    component: {role: button, name: Cancel, match: exact}
+    expect:
+      dispatch: {visible: true, enabled: true, exactly_once: true}
+      first_feedback:
+        within_ms: 1500
+        any_of: [window_appeared]
+      completion:
+        within_ms: 5000
+        window_present: "Discard changes?"
+        unexpected_modal: false
+
+  - id: discard_builder_changes
+    name: discard the test-only builder change
+    action: physical_click
+    risk: reversible
+    window: {title: "Discard changes?", match: exact}
+    component: {role: button, name: "Discard changes", match: exact}
+    expect:
+      dispatch: {visible: true, enabled: true, exactly_once: true}
+      first_feedback:
+        within_ms: 1500
+        any_of: [window_closed]
+      completion:
+        within_ms: 5000
+        window_absent: "Discard changes?"
+        unexpected_modal: false
+        console_errors: absent
+    assertions:
+      - kind: window_absent
+        title: "Discard changes?"
+      - kind: window_absent
+        title: "Filter Builder - Standalone image"
+
+cleanup:
+  close_windows: ["Convolver...", "Edit parameters", "Filter Builder - Standalone image", Macro Builder]
+  close_all_images: true
+  clear_results: true
+  reset_roi_manager: true
+  expect_no_new_files: true
+  fixture_hashes_unchanged: true

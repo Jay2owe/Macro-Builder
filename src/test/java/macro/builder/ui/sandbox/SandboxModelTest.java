@@ -37,6 +37,20 @@ public class SandboxModelTest {
     }
 
     @Test
+    public void addNodeUsesRecordedLegacyCommandWhenItDiffersFromMenuLabel() {
+        SandboxModel model = new SandboxModel();
+        model.addLine();
+        FilterCatalog.Entry entry = FilterCatalog.Entry.legacy(
+                "Process", "Convolve...", "Process > Filters > Convolve...");
+        SandboxModel.Node node = model.addNode(model.lines.get(0), entry,
+                "text1=[1 0 -1]", "Convolver...");
+
+        assertEquals("Convolver...", node.commandName);
+        assertEquals("Process > Filters > Convolve...", node.menuPath);
+        assertTrue(node.isLegacy());
+    }
+
+    @Test
     public void toDagPreservesPrimaryAndBranchChannels() {
         SandboxModel model = SandboxModel.fromDag(new DagIR(1, 2,
                 Arrays.asList(

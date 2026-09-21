@@ -139,9 +139,15 @@ public final class SandboxModel {
     }
 
     Node addNode(Line line, FilterCatalog.Entry entry, String args) {
+        return addNode(line, entry, args, entry == null ? "" : entry.commandName);
+    }
+
+    Node addNode(Line line, FilterCatalog.Entry entry, String args, String legacyCommandName) {
         if (line == null || entry == null || entry.stub || entry.type == null) return null;
+        String commandName = legacyCommandName == null ? "" : legacyCommandName.trim();
+        if (commandName.length() == 0) commandName = entry.commandName;
         Node node = new Node("node_" + nextNode++, entry.type, args,
-                entry.legacy ? entry.commandName : "",
+                entry.legacy ? commandName : "",
                 entry.legacy ? entry.menuPath : "");
         line.nodes.add(node);
         selectNode(node);

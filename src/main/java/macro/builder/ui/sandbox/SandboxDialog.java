@@ -59,7 +59,10 @@ import java.util.List;
 public final class SandboxDialog extends JDialog {
 
     private static final double PREVIEW_COLUMN_FRACTION = 0.37;
-    private static final double AVAILABLE_STEPS_FRACTION = 0.10;
+    // The command catalog needs a real column at the desktop's scaled size;
+    // leaving it at ten percent lets JSplitPane collapse it during pack/layout.
+    private static final double AVAILABLE_STEPS_FRACTION = 0.22;
+    private static final int AVAILABLE_STEPS_MIN_WIDTH = 260;
     private static final double INITIAL_DESKTOP_FRACTION = 0.88;
     private static final Color PREVIEW_ACCENT = new Color(36, 104, 170);
     private static final Color PREVIEW_ACCENT_DARK = new Color(25, 76, 130);
@@ -289,7 +292,9 @@ public final class SandboxDialog extends JDialog {
         previews.add(outputPreview, previewGbc);
 
         JPanel catalogPanel = new JPanel(new BorderLayout(6, 6));
-        catalogPanel.setMinimumSize(new Dimension(0, 1));
+        catalogPanel.setMinimumSize(new Dimension(AVAILABLE_STEPS_MIN_WIDTH, 1));
+        catalogPanel.setPreferredSize(new Dimension(AVAILABLE_STEPS_MIN_WIDTH, 1));
+        catalog.setMinimumSize(new Dimension(AVAILABLE_STEPS_MIN_WIDTH, 1));
         catalogPanel.add(catalog, BorderLayout.CENTER);
 
         JScrollPane canvasScroll = new JScrollPane(canvas);
@@ -312,6 +317,7 @@ public final class SandboxDialog extends JDialog {
         left.add(canvasScroll, BorderLayout.CENTER);
 
         centerRightSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, left, catalogPanel);
+        centerRightSplit.setMinimumSize(new Dimension(AVAILABLE_STEPS_MIN_WIDTH + 320, 1));
         centerRightSplit.setResizeWeight(centerRightLeftFraction());
 
         mainSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, previews, centerRightSplit);
@@ -1157,7 +1163,10 @@ public final class SandboxDialog extends JDialog {
                 }
                 return false;
             }
-            editNewNodeParameters(model.addNode(line, entry, probe.optionsString));
+            // Keep the command name emitted by the recorder.  A menu label and
+            // ImageJ's executable command key can differ for legacy commands.
+            editNewNodeParameters(model.addNode(line, entry, probe.optionsString,
+                    probe.commandName));
             return true;
         } catch (Exception ex) {
             IJ.showMessage("Fiji Command", "Command was not added:\n" + ex.getMessage());

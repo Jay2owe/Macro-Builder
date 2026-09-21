@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.2.6 - 2026-09-21
+
+- Stored the command name captured by ImageJ's recorder when adding a legacy step, so menu labels that differ from executable command keys run correctly.
+- Added regression coverage for recorded command capture and legacy node metadata.
+
+## 0.2.5 - 2026-09-21
+
+- Closed temporary legacy-command probe images instead of leaving ImageJ's current image pointing at a released image.
+
+## 0.2.4 - 2026-09-21
+
+- Kept the visual command catalog visible and clickable at scaled desktop sizes.
+
+## 0.2.3 - 2026-09-21
+
+- Fixed legacy Fiji command execution by preserving ImageJ command suffixes such as `...`.
+- Added regression coverage for legacy command catalog entries and emitted macros.
+
 ## 0.2.2 - 2026-05-21
 
 - Added ImageJ macro option automation for running Macro Builder batch-output workflows without opening the UI.

@@ -368,7 +368,9 @@ public final class FilterCatalog extends JPanel {
             if (item instanceof Menu) {
                 walkMenu((Menu) item, category, itemPath, out);
             } else {
-                out.add(Entry.legacy(category, label, itemPath));
+                // Keep the raw menu label here: normalizeLabel() removes the
+                // trailing "..." that ImageJ needs when resolving commands.
+                out.add(Entry.legacy(category, rawLabel, itemPath));
             }
         }
     }
@@ -441,7 +443,12 @@ public final class FilterCatalog extends JPanel {
         }
 
         static Entry legacy(String category, String commandName, String menuPath) {
-            return new Entry(category, commandName, OpType.UNKNOWN, "", false, true, commandName, menuPath);
+            // The trailing "..." is part of ImageJ's command-table key. Keep
+            // that exact key for IJ.run(), while presenting the same compact
+            // label used by the catalog elsewhere.
+            String executableName = normalizeCommandName(commandName);
+            return new Entry(category, normalizeLabel(executableName), OpType.UNKNOWN,
+                    "", false, true, executableName, menuPath);
         }
 
         public String badge() {
@@ -450,6 +457,10 @@ public final class FilterCatalog extends JPanel {
 
         @Override public String toString() {
             return category + " - " + label;
+        }
+
+        private static String normalizeCommandName(String commandName) {
+            return commandName == null ? "" : commandName.trim().replace("&", "");
         }
     }
 }
